@@ -37,7 +37,7 @@ class HttpsDecryptor(private val context: Context) {
         private const val CA_ALIAS = "traffictool_ca"
         private const val KEYSTORE_TYPE = "PKCS12"
         private const val KEYSTORE_PASSWORD = "traffictool"
-        private const val SIGNATURE_ALGORITHM = "SHA256WithRSAEncryption"
+        private const val SIGNATURE_ALGORITHM = "SHA256withRSA"  // Fixed: Use correct BouncyCastle algorithm name
         private const val KEY_ALGORITHM = "RSA"
         private val BC_PROVIDER = BouncyCastleProvider.PROVIDER_NAME
 
