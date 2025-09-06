@@ -159,7 +159,7 @@ class VpnService : VpnService() {
                         buffer.limit(bytesRead)
                         
                         // [NEW] Parse packet and broadcast info
-                        val packetInfo = PacketParser.parse(buffer.array(), bytesRead)
+                        val packetInfo = PacketParser.parse(buffer.array(), bytesRead, this@VpnService)
                         if (packetInfo != null) {
                             sendPacketInfoBroadcast(packetInfo)
                         }
@@ -178,9 +178,9 @@ class VpnService : VpnService() {
             Log.d(TAG, "VPN Runnable finished.")
         }
 
-        private fun sendPacketInfoBroadcast(info: String) {
+        private fun sendPacketInfoBroadcast(packetInfo: PacketInfo) {
             val intent = Intent(BROADCAST_PACKET_CAPTURED).apply {
-                putExtra(EXTRA_PACKET_INFO, info)
+                putExtra(EXTRA_PACKET_INFO, packetInfo)
             }
             broadcaster.sendBroadcast(intent)
         }

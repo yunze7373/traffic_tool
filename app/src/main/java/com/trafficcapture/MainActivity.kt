@@ -9,13 +9,11 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.net.VpnService
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.Log
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.ListView
-import android.widget.Switch
-import android.widget.TextView
-import android.widget.Toast
+import android.view.View
+import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
@@ -26,9 +24,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportCertBtn: Button
     private lateinit var trafficListView: ListView
     private lateinit var statusText: TextView
+    private lateinit var clearBtn: Button
+    private lateinit var filterEdit: EditText
+    private lateinit var protocolSpinner: Spinner
+    private lateinit var directionSpinner: Spinner
 
-    private lateinit var listAdapter: ArrayAdapter<String>
-    private val trafficData = mutableListOf<String>()
+    private lateinit var listAdapter: PacketAdapter
+    private val allPackets = mutableListOf<PacketInfo>()
+    private val filteredPackets = mutableListOf<PacketInfo>()
     
     private var isCapturing = false
     private var httpsDecryptor: HttpsDecryptor? = null
@@ -149,7 +152,28 @@ class MainActivity : AppCompatActivity() {
                 httpsDecryptor = HttpsDecryptor(this)
             }
             
-            // 导出证书
+            // 显示导出选项对话框
+            AlertDialog.Builder(this)
+                .setTitle("选择导出位置")
+                .setMessage("请选择证书导出位置:")
+                .setPositiveButton("Download目录") { _, _ ->
+                    exportToDownloadDirectory()
+                }
+                .setNegativeButton("应用内存储") { _, _ ->
+                    exportToAppStorage()
+                }
+                .setNeutralButton("取消") { _, _ -> }
+                .show()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during certificate export", e)
+            Toast.makeText(this, "证书导出出错: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+    
+    private fun exportToDownloadDirectory() {
+        try {
+            // 导出证书到Download目录
             val exportPath = httpsDecryptor!!.exportCACertificate()
             
             if (exportPath != null) {
@@ -158,7 +182,7 @@ class MainActivity : AppCompatActivity() {
                 
                 AlertDialog.Builder(this)
                     .setTitle("证书导出成功")
-                    .setMessage("CA证书已导出到:\n$exportPath\n\n请将此证书安装到系统证书存储中。\n\n$certInfo")
+                    .setMessage("CA证书已导出到Download目录:\n$exportPath\n\n请将此证书安装到系统证书存储中。\n\n$certInfo")
                     .setPositiveButton("确定") { _, _ -> }
                     .setNeutralButton("查看安装说明") { _, _ ->
                         showCertificateInstallGuide()
@@ -172,7 +196,37 @@ class MainActivity : AppCompatActivity() {
             }
             
         } catch (e: Exception) {
-            Log.e(TAG, "Error during certificate export", e)
+            Log.e(TAG, "Error during certificate export to download directory", e)
+            Toast.makeText(this, "证书导出出错: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+    
+    private fun exportToAppStorage() {
+        try {
+            // 导出证书到应用内存储
+            val exportPath = httpsDecryptor!!.exportCACertificateToAppStorage()
+            
+            if (exportPath != null) {
+                // 显示成功消息和证书信息
+                val certInfo = httpsDecryptor!!.getCACertificateInfo()
+                
+                AlertDialog.Builder(this)
+                    .setTitle("证书导出成功")
+                    .setMessage("CA证书已导出到应用内存储:\n$exportPath\n\n请将此证书安装到系统证书存储中。\n\n$certInfo")
+                    .setPositiveButton("确定") { _, _ -> }
+                    .setNeutralButton("查看安装说明") { _, _ ->
+                        showCertificateInstallGuide()
+                    }
+                    .show()
+                    
+                Log.d(TAG, "Certificate exported successfully to: $exportPath")
+            } else {
+                Toast.makeText(this, "证书导出失败，请检查日志", Toast.LENGTH_LONG).show()
+                Log.e(TAG, "Failed to export certificate")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during certificate export to app storage", e)
             Toast.makeText(this, "证书导出出错: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }

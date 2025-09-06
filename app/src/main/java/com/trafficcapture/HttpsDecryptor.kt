@@ -37,15 +37,20 @@ class HttpsDecryptor(private val context: Context) {
         private const val CA_ALIAS = "traffictool_ca"
         private const val KEYSTORE_TYPE = "PKCS12"
         private const val KEYSTORE_PASSWORD = "traffictool"
-        private const val SIGNATURE_ALGORITHM = "SHA256withRSA"  // Fixed: Use correct BouncyCastle algorithm name
+        private const val SIGNATURE_ALGORITHM = "SHA256withRSA"  // Standard JCA algorithm name
         private const val KEY_ALGORITHM = "RSA"
-        private val BC_PROVIDER = BouncyCastleProvider.PROVIDER_NAME
-
+        
         // 静态初始化块，确保 BouncyCastle Provider 只被加载一次。
         init {
-            if (Security.getProvider(BC_PROVIDER) == null) {
-                Security.addProvider(BouncyCastleProvider())
-                Log.d(TAG, "BouncyCastleProvider added.")
+            try {
+                if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
+                    Security.addProvider(BouncyCastleProvider())
+                    Log.d(TAG, "BouncyCastleProvider added successfully.")
+                } else {
+                    Log.d(TAG, "BouncyCastleProvider already exists.")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to add BouncyCastleProvider, using default providers", e)
             }
         }
     }
@@ -105,8 +110,8 @@ class HttpsDecryptor(private val context: Context) {
      */
     private fun generateRootCA() {
         try {
-            // 1. 生成密钥对，明确指定 Provider
-            val keyPairGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM, BC_PROVIDER)
+            // 1. 生成密钥对，使用默认提供程序
+            val keyPairGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM)
             keyPairGenerator.initialize(2048, SecureRandom())
             val keyPair = keyPairGenerator.generateKeyPair()
             rootPrivateKey = keyPair.private
@@ -137,16 +142,12 @@ class HttpsDecryptor(private val context: Context) {
             // 密钥用途：用于证书签名和 CRL 签名
             certBuilder.addExtension(Extension.keyUsage, true, KeyUsage(KeyUsage.keyCertSign or KeyUsage.cRLSign))
 
-            // 6. 创建签名器，明确指定 Provider
-            val contentSigner = JcaContentSignerBuilder(SIGNATURE_ALGORITHM)
-                .setProvider(BC_PROVIDER)
-                .build(rootPrivateKey)
+            // 6. 创建签名器
+            val contentSigner = JcaContentSignerBuilder(SIGNATURE_ALGORITHM).build(rootPrivateKey)
 
-            // 7. 生成证书，明确指定 Provider
+            // 7. 生成证书
             val certificateHolder = certBuilder.build(contentSigner)
-            rootCA = JcaX509CertificateConverter()
-                .setProvider(BC_PROVIDER)
-                .getCertificate(certificateHolder)
+            rootCA = JcaX509CertificateConverter().getCertificate(certificateHolder)
 
             Log.d(TAG, "Successfully generated new Root CA certificate.")
 
@@ -198,7 +199,7 @@ class HttpsDecryptor(private val context: Context) {
         return try {
             certificateCache[hostname]?.let { return it }
 
-            val keyPairGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM, BC_PROVIDER)
+            val keyPairGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM)
             keyPairGenerator.initialize(2048)
             val hostKeyPair = keyPairGenerator.generateKeyPair()
 
@@ -217,9 +218,9 @@ class HttpsDecryptor(private val context: Context) {
                 hostKeyPair.public
             )
 
-            val contentSigner = JcaContentSignerBuilder(SIGNATURE_ALGORITHM).setProvider(BC_PROVIDER).build(rootPrivateKey)
+            val contentSigner = JcaContentSignerBuilder(SIGNATURE_ALGORITHM).build(rootPrivateKey)
             val certificateHolder = certBuilder.build(contentSigner)
-            val certificate = JcaX509CertificateConverter().setProvider(BC_PROVIDER).getCertificate(certificateHolder)
+            val certificate = JcaX509CertificateConverter().getCertificate(certificateHolder)
             
             certificateCache[hostname] = certificate
             Log.d(TAG, "Generated certificate for $hostname")
@@ -248,10 +249,55 @@ class HttpsDecryptor(private val context: Context) {
     }
 
     /**
-     * 导出CA证书到应用内部存储
+     * 导出CA证书到外部存储的Download目录
      * 返回导出的文件路径，如果失败返回null
      */
     fun exportCACertificate(): String? {
+        return try {
+            // 确保CA证书已初始化
+            if (rootCA == null) {
+                setupRootCA()
+            }
+            
+            if (rootCA == null) {
+                Log.e(TAG, "CA certificate is not available for export")
+                return null
+            }
+
+            // 导出到Download目录（对于Android 10+不需要特殊权限）
+            val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!downloadDir.exists()) {
+                downloadDir.mkdirs()
+            }
+
+            val certFile = File(downloadDir, "traffic_tool_ca.crt")
+            
+            // 将证书编码为PEM格式
+            val certBytes = rootCA!!.encoded
+            val pemCert = "-----BEGIN CERTIFICATE-----\n" +
+                    java.util.Base64.getEncoder().encodeToString(certBytes)
+                        .chunked(64).joinToString("\n") +
+                    "\n-----END CERTIFICATE-----"
+
+            // 写入文件
+            FileOutputStream(certFile).use { fos ->
+                fos.write(pemCert.toByteArray())
+            }
+
+            Log.d(TAG, "CA certificate exported successfully to: ${certFile.absolutePath}")
+            certFile.absolutePath
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to export CA certificate", e)
+            null
+        }
+    }
+
+    /**
+     * 导出CA证书到应用内部存储
+     * 返回导出的文件路径，如果失败返回null
+     */
+    fun exportCACertificateToAppStorage(): String? {
         return try {
             // 确保CA证书已初始化
             if (rootCA == null) {
@@ -283,11 +329,11 @@ class HttpsDecryptor(private val context: Context) {
                 fos.write(pemCert.toByteArray())
             }
 
-            Log.d(TAG, "CA certificate exported successfully to: ${certFile.absolutePath}")
+            Log.d(TAG, "CA certificate exported successfully to app storage: ${certFile.absolutePath}")
             certFile.absolutePath
             
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to export CA certificate", e)
+            Log.e(TAG, "Failed to export CA certificate to app storage", e)
             null
         }
     }
