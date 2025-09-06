@@ -36,7 +36,8 @@ class UdpForwarder(private val vpnService: VpnService) {
         }
 
         try {
-            val bytesWritten = channel.write(packet.payload)
+            // [FIXED] Use the safe call operator (?.) to handle the nullable channel.
+            val bytesWritten = channel?.write(packet.payload)
             Log.d("UdpForwarder", "$bytesWritten bytes sent to $channelKey")
         } catch (e: IOException) {
             Log.e("UdpForwarder", "Failed to write to UDP channel for $channelKey", e)
