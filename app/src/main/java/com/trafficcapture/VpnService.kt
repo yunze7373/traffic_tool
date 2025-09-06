@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -65,7 +66,13 @@ class VpnService : VpnService() {
 
         Log.d(TAG, "Starting VPN...")
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification())
+        
+        // Use proper foreground service type for Android 14+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_ID, createNotification())
+        }
 
         vpnInterface = establishVpn()
         if (vpnInterface == null) {
