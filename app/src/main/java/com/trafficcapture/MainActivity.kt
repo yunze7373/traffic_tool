@@ -35,6 +35,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnFullVpn: Button
 
     private lateinit var listAdapter: PacketAdapter
+    private lateinit var mitmListView: ListView
+    private val mitmEvents = mutableListOf<com.trafficcapture.mitm.MitmEvent>()
+    private lateinit var mitmAdapter: com.trafficcapture.mitm.MitmEventAdapter
+    private lateinit var viewSwitcher: RadioGroup
+    private lateinit var rbPackets: RadioButton
+    private lateinit var rbMitm: RadioButton
     private val allPackets = mutableListOf<PacketInfo>()
     private val filteredPackets = mutableListOf<PacketInfo>()
     
@@ -101,6 +107,7 @@ class MainActivity : AppCompatActivity() {
                 packetReceiver, 
                 IntentFilter(FullVpnService.BROADCAST_PACKET_CAPTURED)
             )
+            registerReceiver(mitmReceiver, IntentFilter(FullVpnService.BROADCAST_MITM_EVENT))
         }
         
         httpsDecryptor = HttpsDecryptor(this)
@@ -109,7 +116,11 @@ class MainActivity : AppCompatActivity() {
     private fun initViews() {
         captureSwitch = findViewById(R.id.switchCapture)
         exportCertBtn = findViewById(R.id.btnExportCert)
-        trafficListView = findViewById(R.id.traffic_list_view)
+    trafficListView = findViewById(R.id.traffic_list_view)
+    mitmListView = findViewById(R.id.mitm_list_view)
+    viewSwitcher = findViewById(R.id.viewSwitcher)
+    rbPackets = findViewById(R.id.rbPackets)
+    rbMitm = findViewById(R.id.rbMitm)
         statusText = findViewById(R.id.tvStatus)
         
         // 初始化筛选控件
@@ -128,7 +139,9 @@ class MainActivity : AppCompatActivity() {
         setupProtocolSpinner()
 
         listAdapter = PacketAdapter(this, filteredPackets)
-        trafficListView.adapter = listAdapter
+    trafficListView.adapter = listAdapter
+    mitmAdapter = com.trafficcapture.mitm.MitmEventAdapter(this, mitmEvents)
+    mitmListView.adapter = mitmAdapter
         
         // 设置列表项点击事件
         trafficListView.setOnItemClickListener { _, _, position, _ ->
@@ -137,6 +150,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
         
+        viewSwitcher.setOnCheckedChangeListener { _, checkedId ->
+            if (checkedId == R.id.rbPackets) {
+                trafficListView.visibility = View.VISIBLE
+                mitmListView.visibility = View.GONE
+            } else {
+                trafficListView.visibility = View.GONE
+                mitmListView.visibility = View.VISIBLE
+            }
+        }
         updateUi(isCapturing = false)
     }
 
@@ -312,9 +334,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val mitmReceiver = object: BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val ev = intent?.getSerializableExtra(FullVpnService.EXTRA_MITM_EVENT) as? com.trafficcapture.mitm.MitmEvent ?: return
+            mitmEvents.add(0, ev)
+            if (mitmEvents.size > 1000) mitmEvents.removeAt(mitmEvents.size -1)
+            mitmAdapter.notifyDataSetChanged()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(packetReceiver)
+        LocalBroadcastManager.getInstance(this).apply {
+            unregisterReceiver(packetReceiver)
+            unregisterReceiver(mitmReceiver)
+        }
     }
     
     private fun exportCACertificate() {

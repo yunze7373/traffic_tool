@@ -21,6 +21,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import com.trafficcapture.tun2socks.Tun2SocksBridge
+import com.trafficcapture.mitm.MitmProxyManager
+import com.trafficcapture.mitm.MitmEvent
 
 /**
  * 完整的VPN服务 - 既能正常上网又能抓取所有数据包
@@ -35,8 +37,10 @@ class FullVpnService : VpnService() {
         private const val VPN_DNS = "8.8.8.8"
         const val BROADCAST_VPN_STATE = "com.trafficcapture.FULL_VPN_STATE_CHANGED"
         const val BROADCAST_PACKET_CAPTURED = "com.trafficcapture.FULL_PACKET_CAPTURED"
+    const val BROADCAST_MITM_EVENT = "com.trafficcapture.MITM_EVENT"
         const val EXTRA_RUNNING = "extra_running"
         const val EXTRA_PACKET_INFO = "extra_packet_info"
+    const val EXTRA_MITM_EVENT = "extra_mitm_event"
     }
 
     private var vpnInterface: ParcelFileDescriptor? = null
@@ -58,11 +62,15 @@ class FullVpnService : VpnService() {
     // PCAP文件写入支持
     private var pcapFile: RandomAccessFile? = null
     @Volatile private var pcapEnabled = true
+    // MITM 代理
+    private var mitmProxy: MitmProxyManager? = null
+    private lateinit var httpsDecryptor: HttpsDecryptor
 
     override fun onCreate() {
         super.onCreate()
         broadcaster = LocalBroadcastManager.getInstance(this)
         Log.d(TAG, "FullVpnService created")
+    httpsDecryptor = HttpsDecryptor(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -93,6 +101,7 @@ class FullVpnService : VpnService() {
         if (vpnInterface != null) {
             isRunning = true
             initPcap()
+            startMitmProxy()
             if (useNativeTun2Socks) {
                 startNativeEngine(vpnInterface!!)
             } else {
@@ -126,6 +135,7 @@ class FullVpnService : VpnService() {
             udpExecutor.shutdownNow()
             tcpExecutor.shutdownNow()
         }
+    stopMitmProxy()
         closePcap()
 
         vpnInterface?.close()
@@ -469,7 +479,8 @@ class FullVpnService : VpnService() {
                     payload?.let { writePcapPacket(buildRawIpStub(proto, srcIp, srcPort, dstIp, dstPort, it), it.size) }
                 }
             })
-            if (!Tun2SocksBridge.nativeInit(fd, 1500, null, VPN_DNS)) {
+            // 指向本地 MITM 代理 (SOCKS 或需未来 native 实现支持)。当前若 native 尚未实现 SOCKS 将忽略。
+            if (!Tun2SocksBridge.nativeInit(fd, 1500, "127.0.0.1:8889", VPN_DNS)) {
                 Log.e(TAG, "nativeInit failed, fallback to Kotlin forwarding")
                 // fallback
                 useNativeFallback()
@@ -487,6 +498,21 @@ class FullVpnService : VpnService() {
     private fun stopNativeEngine() {
         try { Tun2SocksBridge.nativeStop() } catch (_: Throwable) {}
         Tun2SocksBridge.setListener(null)
+    }
+
+    private fun startMitmProxy() {
+        if (mitmProxy != null) return
+        mitmProxy = MitmProxyManager(httpsDecryptor, eventCallback = { event ->
+            broadcaster.sendBroadcast(Intent(BROADCAST_MITM_EVENT).apply {
+                putExtra(EXTRA_MITM_EVENT, event)
+            })
+        }).also { it.start(8889) }
+        Log.i(TAG, "MITM proxy started on 8889")
+    }
+
+    private fun stopMitmProxy() {
+        mitmProxy?.stop()
+        mitmProxy = null
     }
 
     private fun useNativeFallback() {

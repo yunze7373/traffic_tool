@@ -231,6 +231,57 @@ class HttpsDecryptor(private val context: Context) {
         }
     }
 
+    /**
+     * 为指定 host 构建服务端 SSLContext (用于 MITM): 动态生成 leaf 证书并装载到临时 KeyStore.
+     */
+    fun buildServerSSLContextForHost(hostname: String): SSLContext? {
+        return try {
+            val hostCert = generateCertificateForHost(hostname) ?: return null
+
+            // 重新生成对应私钥用于该 host（与 generateCertificateForHost 中保持一致流程）
+            val keyPairGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM)
+            keyPairGenerator.initialize(2048)
+            val hostKeyPair = keyPairGenerator.generateKeyPair()
+
+            // 由于 generateCertificateForHost 已经生成过 certificate (包含 hostKeyPair.public) ——
+            // 这里需重新生成与私钥匹配的证书；为简化重新签发一次
+            val now = Date()
+            val notAfter = Calendar.getInstance().apply { time = now; add(Calendar.YEAR, 1) }.time
+            val issuer = X500Name(rootCA!!.issuerX500Principal.name)
+            val subject = X500Name("CN=$hostname, O=TrafficTool, C=US")
+            val certBuilder = JcaX509v3CertificateBuilder(
+                issuer,
+                BigInteger.valueOf(System.currentTimeMillis() + 1),
+                now,
+                notAfter,
+                subject,
+                hostKeyPair.public
+            )
+            val contentSigner = JcaContentSignerBuilder(SIGNATURE_ALGORITHM).build(rootPrivateKey)
+            val certificateHolder = certBuilder.build(contentSigner)
+            val finalHostCert = JcaX509CertificateConverter().getCertificate(certificateHolder)
+
+            val ks = KeyStore.getInstance(KEYSTORE_TYPE)
+            ks.load(null, null)
+            ks.setKeyEntry("alias", hostKeyPair.private, KEYSTORE_PASSWORD.toCharArray(), arrayOf(finalHostCert, rootCA))
+
+            val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
+            kmf.init(ks, KEYSTORE_PASSWORD.toCharArray())
+
+            val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+                override fun getAcceptedIssuers(): Array<X509Certificate?> = arrayOfNulls(0)
+                override fun checkClientTrusted(certs: Array<X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(certs: Array<X509Certificate>, authType: String) {}
+            })
+            val sc = SSLContext.getInstance("TLS")
+            sc.init(kmf.keyManagers, trustAll, SecureRandom())
+            sc
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to build server SSLContext for $hostname", e)
+            null
+        }
+    }
+
     fun createSSLSocketFactory(): SSLSocketFactory {
         return try {
             val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {

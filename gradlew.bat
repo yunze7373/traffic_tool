@@ -35,6 +35,11 @@ for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 
+@rem Prefer embedded / script-defined JDK 21 if present
+if not defined JAVA_HOME (
+	if exist "%ProgramFiles%\Eclipse Adoptium\jdk-21.0.8.9-hotspot" set JAVA_HOME=%ProgramFiles%\Eclipse Adoptium\jdk-21.0.8.9-hotspot
+)
+
 @rem Find java.exe
 if defined JAVA_HOME goto findJavaFromJavaHome
 
@@ -44,6 +49,7 @@ if "%ERRORLEVEL%" == "0" goto execute
 
 echo.
 echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
+echo Attempted automatic detection of Eclipse Adoptium JDK 21 but failed.
 echo.
 echo Please set the JAVA_HOME variable in your environment to match the
 echo location of your Java installation.

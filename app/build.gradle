@@ -14,9 +14,12 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
-        
         multiDexEnabled true
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        externalNativeBuild {
+            cmake { cppFlags "-O2" }
+        }
+        ndk { abiFilters 'arm64-v8a','armeabi-v7a' }
     }
 
     buildTypes {
@@ -26,17 +29,36 @@ android {
         }
     }
 
+    externalNativeBuild {
+        cmake {
+            path file("src/main/cpp/CMakeLists.txt")
+        }
+    }
+
+    // (Removed duplicated defaultConfig)
+
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_11
-        targetCompatibility JavaVersion.VERSION_11
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = '11'
+        // Kotlin 1.9.10 尚未支持 jvmTarget=21，保持 17 以兼容，同时通过 toolchain 使用 JDK21
+        jvmTarget = '17'
+    }
+
+    kotlin {
+        jvmToolchain(21)
     }
 
     buildFeatures {
         viewBinding true
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ["src/main/jniLibs"]
+        }
     }
 }
 
@@ -62,6 +84,10 @@ dependencies {
     // BouncyCastle for certificate generation
     implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
     implementation 'org.bouncycastle:bcpkix-jdk15on:1.70'
+
+    // Coroutines for async native proxy / socks handling
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 
     // Test dependencies
     testImplementation 'junit:junit:4.13.2'
