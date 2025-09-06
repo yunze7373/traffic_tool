@@ -98,8 +98,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         exportCertBtn.setOnClickListener {
-            // This part remains the same, using the fixed HttpsDecryptor
-            // exportCACertificate()
+            exportCACertificate()
         }
     }
     
@@ -143,6 +142,60 @@ class MainActivity : AppCompatActivity() {
         LocalBroadcastManager.getInstance(this).unregisterReceiver(packetReceiver)
     }
     
-    // The certificate export logic can be added back here.
-    // For now, let's focus on getting traffic capture to work first.
+    private fun exportCACertificate() {
+        try {
+            // 初始化HTTPS解密器（如果还没有）
+            if (httpsDecryptor == null) {
+                httpsDecryptor = HttpsDecryptor(this)
+            }
+            
+            // 导出证书
+            val exportPath = httpsDecryptor!!.exportCACertificate()
+            
+            if (exportPath != null) {
+                // 显示成功消息和证书信息
+                val certInfo = httpsDecryptor!!.getCACertificateInfo()
+                
+                AlertDialog.Builder(this)
+                    .setTitle("证书导出成功")
+                    .setMessage("CA证书已导出到:\n$exportPath\n\n请将此证书安装到系统证书存储中。\n\n$certInfo")
+                    .setPositiveButton("确定") { _, _ -> }
+                    .setNeutralButton("查看安装说明") { _, _ ->
+                        showCertificateInstallGuide()
+                    }
+                    .show()
+                    
+                Log.d(TAG, "Certificate exported successfully to: $exportPath")
+            } else {
+                Toast.makeText(this, "证书导出失败，请检查日志", Toast.LENGTH_LONG).show()
+                Log.e(TAG, "Failed to export certificate")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during certificate export", e)
+            Toast.makeText(this, "证书导出出错: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+    
+    private fun showCertificateInstallGuide() {
+        val guide = """
+            证书安装步骤:
+            
+            1. 进入 设置 > 安全 > 加密和凭据
+            2. 选择 "从存储设备安装"
+            3. 浏览到应用数据目录中的证书文件
+            4. 选择 traffic_tool_ca.crt 文件
+            5. 设置证书名称（如：TrafficTool CA）
+            6. 选择用于 "VPN和应用" 
+            7. 确认安装
+            
+            注意: 某些Android版本可能需要先设置锁屏密码
+        """.trimIndent()
+        
+        AlertDialog.Builder(this)
+            .setTitle("证书安装指南")
+            .setMessage(guide)
+            .setPositiveButton("确定") { _, _ -> }
+            .show()
+    }
 }

@@ -1,7 +1,9 @@
 package com.trafficcapture
 
 import android.content.Context
+import android.os.Environment
 import android.util.Log
+import android.widget.Toast
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.asn1.x509.BasicConstraints
 import org.bouncycastle.asn1.x509.Extension
@@ -242,6 +244,76 @@ class HttpsDecryptor(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error creating SSL socket factory", e)
             SSLSocketFactory.getDefault() as SSLSocketFactory
+        }
+    }
+
+    /**
+     * 导出CA证书到应用内部存储
+     * 返回导出的文件路径，如果失败返回null
+     */
+    fun exportCACertificate(): String? {
+        return try {
+            // 确保CA证书已初始化
+            if (rootCA == null) {
+                setupRootCA()
+            }
+            
+            if (rootCA == null) {
+                Log.e(TAG, "CA certificate is not available for export")
+                return null
+            }
+
+            // 使用应用内部存储目录，不需要特殊权限
+            val exportDir = File(context.filesDir, "certificates")
+            if (!exportDir.exists()) {
+                exportDir.mkdirs()
+            }
+
+            val certFile = File(exportDir, "traffic_tool_ca.crt")
+            
+            // 将证书编码为PEM格式
+            val certBytes = rootCA!!.encoded
+            val pemCert = "-----BEGIN CERTIFICATE-----\n" +
+                    java.util.Base64.getEncoder().encodeToString(certBytes)
+                        .chunked(64).joinToString("\n") +
+                    "\n-----END CERTIFICATE-----"
+
+            // 写入文件
+            FileOutputStream(certFile).use { fos ->
+                fos.write(pemCert.toByteArray())
+            }
+
+            Log.d(TAG, "CA certificate exported successfully to: ${certFile.absolutePath}")
+            certFile.absolutePath
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to export CA certificate", e)
+            null
+        }
+    }
+
+    /**
+     * 获取CA证书信息用于显示
+     */
+    fun getCACertificateInfo(): String? {
+        return try {
+            if (rootCA == null) {
+                setupRootCA()
+            }
+            
+            rootCA?.let { cert ->
+                """
+                证书信息:
+                主题: ${cert.subjectX500Principal.name}
+                颁发者: ${cert.issuerX500Principal.name}
+                序列号: ${cert.serialNumber}
+                有效期: ${cert.notBefore} 至 ${cert.notAfter}
+                算法: ${cert.sigAlgName}
+                """.trimIndent()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get CA certificate info", e)
+            null
         }
     }
 }
