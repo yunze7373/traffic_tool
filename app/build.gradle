@@ -1,4 +1,4 @@
-// [REBUILT] Using a clean, modern template for stability.
+// Modern Android application build configuration
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'

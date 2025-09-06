@@ -7,40 +7,63 @@ import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.DatagramChannel
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
 
 /**
- * Handles forwarding of UDP packets.
- * It creates protected sockets to bypass the VPN for outgoing traffic.
+ * [UPGRADED] Handles full duplex forwarding of UDP packets.
  */
-class UdpForwarder(private val vpnService: VpnService) {
-
+class UdpForwarder(
+    private val vpnService: VpnService,
+    private val executor: ExecutorService,
+    private val vpnOutput: (ByteBuffer) -> Unit
+) {
     private val channels = ConcurrentHashMap<String, DatagramChannel>()
 
     fun forward(packet: Packet) {
         val destination = InetSocketAddress(packet.ipHeader.destinationAddress, packet.transportHeader.destinationPort)
-        val source = InetSocketAddress(packet.ipHeader.sourceAddress, packet.transportHeader.sourcePort)
-        val channelKey = "${destination.hostString}:${destination.port}"
+        val connectionKey = "${destination.hostString}:${destination.port}"
 
-        var channel = channels[channelKey]
+        var channel = channels[connectionKey]
         if (channel == null) {
             try {
                 channel = DatagramChannel.open()
                 vpnService.protect(channel.socket())
                 channel.connect(destination)
-                channels[channelKey] = channel
-                Log.d("UdpForwarder", "New UDP channel created for $channelKey")
+                channel.configureBlocking(false)
+
+                channels[connectionKey] = channel
+                Log.d("UdpForwarder", "New UDP channel for $connectionKey")
+
+                // Start a reader thread for this new channel
+                executor.submit { handleRemoteToVpn(channel, packet) }
+
             } catch (e: IOException) {
-                Log.e("UdpForwarder", "Failed to create UDP channel for $channelKey", e)
+                Log.e("UdpForwarder", "Failed to create UDP channel for $connectionKey", e)
                 return
             }
         }
 
         try {
-            // [FIXED] Use the safe call operator (?.) to handle the nullable channel.
-            val bytesWritten = channel?.write(packet.payload)
-            Log.d("UdpForwarder", "$bytesWritten bytes sent to $channelKey")
+            channel?.write(packet.payload)
         } catch (e: IOException) {
-            Log.e("UdpForwarder", "Failed to write to UDP channel for $channelKey", e)
+            Log.e("UdpForwarder", "Failed to write to UDP channel for $connectionKey", e)
+        }
+    }
+
+    private fun handleRemoteToVpn(channel: DatagramChannel, originalPacket: Packet) {
+        val buffer = ByteBuffer.allocate(32767)
+        try {
+            while (channel.isConnected) {
+                val bytesRead = channel.read(buffer)
+                if (bytesRead > 0) {
+                    buffer.flip()
+                    val responsePacket = PacketBuilder.buildUdpResponse(originalPacket, buffer, bytesRead)
+                    vpnOutput(responsePacket)
+                    buffer.clear()
+                }
+            }
+        } catch (e: IOException) {
+            Log.e("UdpForwarder", "Error reading from remote UDP socket", e)
         }
     }
 }

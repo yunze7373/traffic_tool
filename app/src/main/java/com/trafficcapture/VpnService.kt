@@ -18,8 +18,9 @@ import java.io.IOException
 import java.nio.ByteBuffer
 
 /**
- * [REBUILT] A functional VpnService that captures all traffic and forwards it.
+ * A functional VpnService that captures all traffic and forwards it.
  */
+@Suppress("unused")
 class VpnService : VpnService() {
 
     companion object {
@@ -54,36 +55,32 @@ class VpnService : VpnService() {
                 stopVpn()
                 return START_NOT_STICKY
             }
+            else -> return START_NOT_STICKY
         }
-        return START_NOT_STICKY
     }
 
     private fun startVpn() {
-        if (isRunning) {
-            Log.d(TAG, "VPN is already running.")
+        if (isRunning) return
+        Log.d(TAG, "Starting VPN...")
+
+        vpnInterface = establishVpn()
+        if (vpnInterface == null) {
+            Log.e(TAG, "Could not establish vpn interface.")
             return
         }
 
-        Log.d(TAG, "Starting VPN...")
+        isRunning = true
+        vpnThread = Thread(VpnRunnable(vpnInterface!!))
+        vpnThread!!.start()
+
         createNotificationChannel()
         
-        // Use proper foreground service type for Android 14+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(NOTIFICATION_ID, createNotification())
         }
-
-        vpnInterface = establishVpn()
-        if (vpnInterface == null) {
-            Log.e(TAG, "Failed to establish VPN interface.")
-            stopVpn()
-            return
-        }
-
-        isRunning = true
-        vpnThread = Thread(VpnRunnable(vpnInterface!!), "VpnTrafficHandler")
-        vpnThread?.start()
+        
         Log.d(TAG, "VPN Started Successfully.")
     }
 
@@ -93,10 +90,15 @@ class VpnService : VpnService() {
         vpnThread?.interrupt()
         try {
             vpnInterface?.close()
-        } catch (e: IOException) {
-            Log.e(TAG, "Error closing VPN interface", e)
+        } catch (_: IOException) {
+            Log.e(TAG, "Error closing VPN interface")
         }
-        stopForeground(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         stopSelf()
         Log.d(TAG, "VPN Stopped.")
     }
@@ -113,6 +115,47 @@ class VpnService : VpnService() {
         } catch (e: Exception) {
             Log.e(TAG, "Cannot establish VPN", e)
             null
+        }
+    }
+
+    private inner class VpnRunnable(private val vpnInterface: ParcelFileDescriptor) : Runnable {
+        override fun run() {
+            val vpnInput = FileInputStream(vpnInterface.fileDescriptor)
+            val vpnOutput = FileOutputStream(vpnInterface.fileDescriptor)
+            val buffer = ByteBuffer.allocate(32767)
+
+            Log.d(TAG, "VPN Runnable started.")
+            while (isRunning && !Thread.currentThread().isInterrupted) {
+                try {
+                    val bytesRead = vpnInput.read(buffer.array())
+                    if (bytesRead > 0) {
+                        buffer.limit(bytesRead)
+                        
+                        // Parse packet and broadcast info
+                        val packetInfo = PacketParser.parse(buffer.array(), bytesRead, this@VpnService)
+                        if (packetInfo != null) {
+                            sendPacketInfoBroadcast(packetInfo)
+                        }
+                        
+                        // Write the packet back to allow traffic to flow
+                        vpnOutput.write(buffer.array(), 0, bytesRead)
+                        buffer.clear()
+                    }
+                } catch (e: IOException) {
+                    Log.e(TAG, "VPN I/O Error", e)
+                    break
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+            Log.d(TAG, "VPN Runnable finished.")
+        }
+
+        private fun sendPacketInfoBroadcast(packetInfo: PacketInfo) {
+            val intent = Intent(BROADCAST_PACKET_CAPTURED).apply {
+                putExtra(EXTRA_PACKET_INFO, packetInfo)
+            }
+            broadcaster.sendBroadcast(intent)
         }
     }
 
@@ -143,46 +186,5 @@ class VpnService : VpnService() {
     override fun onDestroy() {
         stopVpn()
         super.onDestroy()
-    }
-
-    private inner class VpnRunnable(private val vpnInterface: ParcelFileDescriptor) : Runnable {
-        override fun run() {
-            val vpnInput = FileInputStream(vpnInterface.fileDescriptor)
-            val vpnOutput = FileOutputStream(vpnInterface.fileDescriptor)
-            val buffer = ByteBuffer.allocate(32767)
-
-            Log.d(TAG, "VPN Runnable started.")
-            while (isRunning && !Thread.currentThread().isInterrupted) {
-                try {
-                    val bytesRead = vpnInput.read(buffer.array())
-                    if (bytesRead > 0) {
-                        buffer.limit(bytesRead)
-                        
-                        // [NEW] Parse packet and broadcast info
-                        val packetInfo = PacketParser.parse(buffer.array(), bytesRead, this@VpnService)
-                        if (packetInfo != null) {
-                            sendPacketInfoBroadcast(packetInfo)
-                        }
-                        
-                        // [FIX] Write the packet back to allow traffic to flow
-                        vpnOutput.write(buffer.array(), 0, bytesRead)
-                        buffer.clear()
-                    }
-                } catch (e: IOException) {
-                    Log.e(TAG, "VPN I/O Error", e)
-                    break
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
-            }
-            Log.d(TAG, "VPN Runnable finished.")
-        }
-
-        private fun sendPacketInfoBroadcast(packetInfo: PacketInfo) {
-            val intent = Intent(BROADCAST_PACKET_CAPTURED).apply {
-                putExtra(EXTRA_PACKET_INFO, packetInfo)
-            }
-            broadcaster.sendBroadcast(intent)
-        }
     }
 }
