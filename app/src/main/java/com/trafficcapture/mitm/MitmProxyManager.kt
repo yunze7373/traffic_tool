@@ -63,10 +63,10 @@ class MitmProxyManager(
                     // 直接 HTTP 明文
                     val parsed = HttpStreamParser.parseMessage(ByteArrayInputStream(peek,0,read))
                     eventCallback(
-                        MitmEvent(
+                        MitmEvent.Legacy(
                             type = MitmEvent.Type.REQUEST,
                             direction = MitmEvent.Direction.OUTBOUND,
-                            host = extractHost(parsed?.headers, targetHost),
+                            hostname = extractHost(parsed?.headers, targetHost),
                             method = parsed?.method,
                             url = parsed?.url,
                             headers = parsed?.headers ?: emptyMap(),
@@ -104,10 +104,10 @@ class MitmProxyManager(
                     val reqParsed = HttpStreamParser.parseMessage(clientIn)
                     reqParsed?.let {
                         eventCallback(
-                            MitmEvent(
+                            MitmEvent.Legacy(
                                 type = MitmEvent.Type.REQUEST,
                                 direction = MitmEvent.Direction.OUTBOUND,
-                                host = targetHost,
+                                hostname = targetHost,
                                 method = it.method,
                                 url = it.url,
                                 headers = it.headers,
@@ -128,10 +128,10 @@ class MitmProxyManager(
                     val respParsed = HttpStreamParser.parseMessage(upstreamIn)
                     respParsed?.let {
                         eventCallback(
-                            MitmEvent(
+                            MitmEvent.Legacy(
                                 type = MitmEvent.Type.RESPONSE,
                                 direction = MitmEvent.Direction.INBOUND,
-                                host = targetHost,
+                                hostname = targetHost,
                                 statusCode = it.statusCode,
                                 headers = it.headers,
                                 payloadPreview = it.bodyPreview
@@ -154,11 +154,9 @@ class MitmProxyManager(
             } catch (e: Exception) {
                 Log.w(TAG, "Client error: ${e.message}")
                 eventCallback(
-                    MitmEvent(
-                        type = MitmEvent.Type.ERROR,
-                        direction = MitmEvent.Direction.INBOUND,
-                        host = targetHost,
-                        payloadPreview = e.message
+                    MitmEvent.Error(
+                        hostname = targetHost,
+                        message = e.message ?: "Unknown error"
                     )
                 )
             } finally {

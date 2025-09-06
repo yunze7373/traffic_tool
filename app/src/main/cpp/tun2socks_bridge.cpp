@@ -1,4 +1,6 @@
 // Real integration bridge with fallback stub.
+// Enhanced: multi-name dlopen attempts + detailed logging to help users
+// drop in a prebuilt libtun2socks_core.so for various ABIs (arm / x86 / x86_64).
 #include <jni.h>
 #include <string>
 #include <atomic>
@@ -11,6 +13,12 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <cstring>
+#include <android/log.h>
+
+#define LOG_TAG "Tun2SocksBridge"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 static JavaVM* g_vm = nullptr;
 static jclass g_bridgeClass = nullptr;
@@ -67,19 +75,45 @@ static void core_packet_cb(int direction, int proto, const char* srcIp, int srcP
 
 static void load_core_if_present() {
     if (core_loaded) return;
-    // The prebuilt real engine should be placed as libtun2socks_core.so in same dir
-    core_handle = dlopen("libtun2socks_core.so", RTLD_NOW);
-    if (!core_handle) return; // fallback to stub
+    const char* candidates[] = {
+            "libtun2socks_core.so",            // primary expected name
+            "libtun2socks_core_v1.so",         // alternative versioned name (optional)
+            "libtun2socks.so"                  // some distributions may use this
+    };
+    for (const char* name : candidates) {
+        core_handle = dlopen(name, RTLD_NOW);
+        if (core_handle) {
+            LOGI("Loaded core library candidate: %s", name);
+            break;
+        } else {
+            const char* err = dlerror();
+            LOGW("Failed to load %s: %s", name, err ? err : "unknown");
+        }
+    }
+    if (!core_handle) {
+        LOGW("No core library found. Using stub fallback (synthetic packets only).");
+        return; // fallback to stub
+    }
     core_init = (fn_core_init)dlsym(core_handle, "tt_init");
     core_start = (fn_core_start)dlsym(core_handle, "tt_start");
     core_stop = (fn_core_stop)dlsym(core_handle, "tt_stop");
     core_setlog = (fn_core_setlog)dlsym(core_handle, "tt_set_log_level");
     core_version = (fn_core_version)dlsym(core_handle, "tt_version");
     core_register = (fn_core_register_cb)dlsym(core_handle, "tt_register_callback");
-    if (core_init && core_start && core_stop) {
-        if (core_register) core_register(core_packet_cb);
-        core_loaded = true;
+
+    if (!(core_init && core_start && core_stop)) {
+        LOGE("Core library missing required symbols (tt_init/tt_start/tt_stop). Reverting to stub.");
+        dlclose(core_handle);
+        core_handle = nullptr;
+        return;
     }
+    if (core_register) {
+        core_register(core_packet_cb);
+    } else {
+        LOGW("Core library missing optional tt_register_callback symbol; no live packet callbacks.");
+    }
+    core_loaded = true;
+    LOGI("Core library initialized successfully.");
 }
 
 // Fallback stub generator
@@ -124,9 +158,14 @@ Java_com_trafficcapture_tun2socks_Tun2SocksBridge_nativeInit(JNIEnv* env, jobjec
     load_core_if_present();
     if (core_loaded && core_init) {
         int rc = core_init(g_tun_fd, g_socks_server.c_str(), g_dns_server.c_str(), g_mtu);
-        return rc == 0 ? JNI_TRUE : JNI_FALSE;
+        if (rc == 0) {
+            LOGI("Core init succeeded (fd=%d mtu=%d socks=%s dns=%s)", g_tun_fd, g_mtu, g_socks_server.c_str(), g_dns_server.c_str());
+            return JNI_TRUE;
+        } else {
+            LOGE("Core init failed rc=%d; using stub fallback.", rc);
+        }
     }
-    return JNI_TRUE; // allow fallback
+    return JNI_TRUE; // allow fallback even if init failed
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
