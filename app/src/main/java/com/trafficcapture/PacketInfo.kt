@@ -36,7 +36,7 @@ data class PacketInfo(
         constructor(parcel: Parcel) : this(
             parcel.readString(),
             parcel.readString(),
-            parcel.readMap(HashMap<String, String>().javaClass.classLoader) as Map<String, String>,
+            parcel.readHashMap(String::class.java.classLoader) as Map<String, String>,
             parcel.readValue(Int::class.java.classLoader) as? Int,
             parcel.readString()
         )

@@ -24,10 +24,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportCertBtn: Button
     private lateinit var trafficListView: ListView
     private lateinit var statusText: TextView
-    private lateinit var clearBtn: Button
-    private lateinit var filterEdit: EditText
-    private lateinit var protocolSpinner: Spinner
-    private lateinit var directionSpinner: Spinner
 
     private lateinit var listAdapter: PacketAdapter
     private val allPackets = mutableListOf<PacketInfo>()
@@ -53,13 +49,14 @@ class MainActivity : AppCompatActivity() {
     
     private val packetReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            intent?.getStringExtra(com.trafficcapture.VpnService.EXTRA_PACKET_INFO)?.let {
-                // To avoid flooding, we only keep the last 200 packets.
-                if (trafficData.size > 200) {
-                    trafficData.removeAt(trafficData.size - 1)
+            val packetInfo = intent?.getParcelableExtra<PacketInfo>(com.trafficcapture.VpnService.EXTRA_PACKET_INFO)
+            if (packetInfo != null) {
+                allPackets.add(0, packetInfo)
+                applyFilters()
+                // 限制最大数据量
+                if (allPackets.size > 1000) {
+                    allPackets.removeAt(allPackets.size - 1)
                 }
-                trafficData.add(0, it)
-                listAdapter.notifyDataSetChanged()
             }
         }
     }
@@ -82,11 +79,18 @@ class MainActivity : AppCompatActivity() {
     private fun initViews() {
         captureSwitch = findViewById(R.id.switchCapture)
         exportCertBtn = findViewById(R.id.btnExportCert)
-        trafficListView = findViewById(R.id.traffic_list_view) // Make sure this ID is in your layout
+        trafficListView = findViewById(R.id.traffic_list_view)
         statusText = findViewById(R.id.tvStatus)
 
-        listAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, trafficData)
+        listAdapter = PacketAdapter(this, filteredPackets)
         trafficListView.adapter = listAdapter
+        
+        // 设置列表项点击事件
+        trafficListView.setOnItemClickListener { _, _, position, _ ->
+            if (position < filteredPackets.size) {
+                showPacketDetails(filteredPackets[position])
+            }
+        }
         
         updateUi(isCapturing = false)
     }
@@ -105,6 +109,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
+    private fun applyFilters() {
+        // 简化版筛选，仅将所有包复制到filteredPackets
+        filteredPackets.clear()
+        filteredPackets.addAll(allPackets)
+        listAdapter.notifyDataSetChanged()
+    }
+    
+    private fun showPacketDetails(packet: PacketInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("数据包详情")
+            .setMessage(packet.getDetailedDescription())
+            .setPositiveButton("确定") { _, _ -> }
+            .setNeutralButton("复制") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText("数据包详情", packet.getDetailedDescription())
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(this, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+    
     private fun prepareAndStartVpn() {
         val vpnIntent = VpnService.prepare(this)
         if (vpnIntent != null) {
@@ -117,7 +142,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startVpnService() {
-        trafficData.clear()
+        allPackets.clear()
+        filteredPackets.clear()
         listAdapter.notifyDataSetChanged()
         val intent = Intent(this, com.trafficcapture.VpnService::class.java).apply {
             action = com.trafficcapture.VpnService.ACTION_START
