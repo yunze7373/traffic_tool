@@ -1,0 +1,200 @@
+# =======================
+# Android Studio / IntelliJ IDEA
+# =======================
+*.iml
+.idea/
+.gradle/
+local.properties
+.DS_Store
+
+# =======================
+# Android Build Files
+# =======================
+build/
+*/build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# =======================
+# Gradle Files
+# =======================
+.gradle/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+
+# =======================
+# Android Generated Files
+# =======================
+bin/
+gen/
+out/
+
+# =======================
+# APK Files (optional - uncomment if you want to track APKs)
+# =======================
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# =======================
+# ProGuard
+# =======================
+proguard/
+
+# =======================
+# Log Files
+# =======================
+*.log
+
+# =======================
+# Keystore Files (IMPORTANT!)
+# =======================
+*.jks
+*.keystore
+key.properties
+keystore.properties
+
+# =======================
+# Local Configuration Files
+# =======================
+local.properties
+
+# =======================
+# OS Generated Files
+# =======================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# =======================
+# IDE Temporary Files
+# =======================
+# VS Code
+.vscode/
+*.code-workspace
+
+# Eclipse
+.metadata
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+.settings/
+.loadpath
+.recommenders
+
+# =======================
+# Java
+# =======================
+*.class
+*.jar
+!gradle-wrapper.jar
+
+# =======================
+# Kotlin
+# =======================
+*.kt.meta
+
+# =======================
+# Android Lint
+# =======================
+lint-results.html
+lint-results_files/
+lint-results.xml
+
+# =======================
+# Unit Test Results
+# =======================
+/test-results/
+/androidTest-results/
+/build/reports/
+/build/test-results/
+
+# =======================
+# Firebase
+# =======================
+google-services.json
+GoogleService-Info.plist
+
+# =======================
+# Fabric
+# =======================
+fabric.properties
+
+# =======================
+# Fastlane
+# =======================
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# =======================
+# Version Control
+# =======================
+.svn/
+.hg/
+.bzr/
+
+# =======================
+# Backup Files
+# =======================
+*.bak
+*.backup
+*~
+
+# =======================
+# Temporary Files
+# =======================
+*.tmp
+*.temp
+*.cache
+
+# =======================
+# NDK
+# =======================
+obj/
+.externalNativeBuild/
+
+# =======================
+# AAR (Android Archive) Files
+# =======================
+*.aar
+
+# =======================
+# Navigation Editor temp files
+# =======================
+.navigation/
+
+# =======================
+# Android Profiling
+# =======================
+*.hprof
+
+# =======================
+# Custom Project Files
+# =======================
+# Add any project-specific files you want to ignore here
+
+# Example: Custom build scripts (uncomment if needed)
+# build_custom.bat
+# deploy.sh
+
+# Example: Local configuration (uncomment if needed)
+# config/local/
+# secrets/

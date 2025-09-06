@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Traffic Capture Tool</string>
+    <string name="start_capture">Start Capture</string>
+    <string name="stop_capture">Stop Capture</string>
+    <string name="status_ready">Ready to capture</string>
+    <string name="status_capturing">Capturing traffic...</string>
+    <string name="status_stopped">Capture stopped</string>
+    <string name="vpn_permission_required">VPN permission is required for traffic capture</string>
+    <string name="vpn_service_started">VPN service started successfully</string>
+    <string name="vpn_permission_denied">VPN permission denied</string>
+    <string name="captured_traffic">Captured Traffic:</string>
+    <string name="enable_capture">Enable Capture</string>
+</resources>
