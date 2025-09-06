@@ -96,8 +96,41 @@ data class PacketInfo(
                 }
             }
         }
+
+        // 添加Payload预览
+        payload?.let { data ->
+            if (data.isNotEmpty()) {
+                sb.append("\n数据载荷预览 (前512字节):\n")
+                sb.append(buildPayloadPreview(data, 512))
+            }
+        }
         
         return sb.toString()
+    }
+
+    private fun buildPayloadPreview(bytes: ByteArray, limit: Int): String {
+        val len = bytes.size.coerceAtMost(limit)
+        val hexBuilder = StringBuilder()
+        val asciiBuilder = StringBuilder()
+        for (i in 0 until len) {
+            val b = bytes[i].toInt() and 0xFF
+            hexBuilder.append(String.format("%02X ", b))
+            val ch = if (b in 32..126) b.toChar() else '.'
+            asciiBuilder.append(ch)
+            if ((i + 1) % 16 == 0 || i == len - 1) {
+                // 填充hex列
+                val pad = 16 - ((i + 1) % 16).let { if (it == 0) 16 else it }
+                if (pad > 0 && pad < 16) {
+                    repeat(pad) { hexBuilder.append("   ") }
+                }
+                hexBuilder.append(" | ").append(asciiBuilder).append('\n')
+                asciiBuilder.setLength(0)
+            }
+        }
+        if (bytes.size > len) {
+            hexBuilder.append("... (截断, 总大小=${bytes.size}字节)\n")
+        }
+        return hexBuilder.toString()
     }
     
     override fun equals(other: Any?): Boolean {

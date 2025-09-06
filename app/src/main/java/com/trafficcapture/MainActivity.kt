@@ -24,10 +24,27 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportCertBtn: Button
     private lateinit var trafficListView: ListView
     private lateinit var statusText: TextView
+    
+    // 筛选控件
+    private lateinit var filterEditText: EditText
+    private lateinit var protocolSpinner: Spinner
+    private lateinit var clearFilterBtn: Button
+    
+    // VPN模式按钮
+    private lateinit var btnLightVpn: Button
+    private lateinit var btnFullVpn: Button
 
     private lateinit var listAdapter: PacketAdapter
     private val allPackets = mutableListOf<PacketInfo>()
     private val filteredPackets = mutableListOf<PacketInfo>()
+    
+    // 当前VPN模式
+    private var currentVpnMode: VpnMode = VpnMode.LIGHT
+    
+    enum class VpnMode {
+        LIGHT,
+        FULL
+    }
     
     private var isCapturing = false
     private var httpsDecryptor: HttpsDecryptor? = null
@@ -49,7 +66,14 @@ class MainActivity : AppCompatActivity() {
     
     private val packetReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            val packetInfo = intent?.getParcelableExtra<PacketInfo>(com.trafficcapture.VpnService.EXTRA_PACKET_INFO)
+            // 处理来自LightVpnService的数据包
+            var packetInfo = intent?.getParcelableExtra<PacketInfo>(LightVpnService.EXTRA_PACKET_INFO)
+            
+            // 如果没有找到LightVpnService的数据包，尝试FullVpnService
+            if (packetInfo == null) {
+                packetInfo = intent?.getParcelableExtra<PacketInfo>(FullVpnService.EXTRA_PACKET_INFO)
+            }
+            
             if (packetInfo != null) {
                 allPackets.add(0, packetInfo)
                 applyFilters()
@@ -68,10 +92,16 @@ class MainActivity : AppCompatActivity() {
         initViews()
         setupListeners()
 
-        LocalBroadcastManager.getInstance(this).registerReceiver(
-            packetReceiver, 
-            IntentFilter(com.trafficcapture.VpnService.BROADCAST_PACKET_CAPTURED)
-        )
+        LocalBroadcastManager.getInstance(this).apply {
+            registerReceiver(
+                packetReceiver, 
+                IntentFilter(LightVpnService.BROADCAST_PACKET_CAPTURED)
+            )
+            registerReceiver(
+                packetReceiver, 
+                IntentFilter(FullVpnService.BROADCAST_PACKET_CAPTURED)
+            )
+        }
         
         httpsDecryptor = HttpsDecryptor(this)
     }
@@ -81,6 +111,21 @@ class MainActivity : AppCompatActivity() {
         exportCertBtn = findViewById(R.id.btnExportCert)
         trafficListView = findViewById(R.id.traffic_list_view)
         statusText = findViewById(R.id.tvStatus)
+        
+        // 初始化筛选控件
+        filterEditText = findViewById(R.id.etFilter)
+        protocolSpinner = findViewById(R.id.spinnerProtocol)
+        clearFilterBtn = findViewById(R.id.btnClearFilter)
+        
+        // 初始化VPN模式按钮
+        btnLightVpn = findViewById(R.id.btnLightVpn)
+        btnFullVpn = findViewById(R.id.btnFullVpn)
+        
+        // 设置初始按钮状态
+        updateVpnModeButtons()
+        
+        // 设置协议筛选下拉框
+        setupProtocolSpinner()
 
         listAdapter = PacketAdapter(this, filteredPackets)
         trafficListView.adapter = listAdapter
@@ -107,12 +152,78 @@ class MainActivity : AppCompatActivity() {
         exportCertBtn.setOnClickListener {
             exportCACertificate()
         }
+        
+        // 筛选功能监听器
+        filterEditText.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                applyFilters()
+            }
+        })
+        
+        protocolSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                applyFilters()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        
+        clearFilterBtn.setOnClickListener {
+            filterEditText.setText("")
+            protocolSpinner.setSelection(0)
+            applyFilters()
+        }
+        
+        // VPN模式按钮监听器
+        btnLightVpn.setOnClickListener {
+            switchToVpnMode(VpnMode.LIGHT)
+        }
+        
+        btnFullVpn.setOnClickListener {
+            switchToVpnMode(VpnMode.FULL)
+        }
+    }
+    
+    private fun setupProtocolSpinner() {
+        val protocols = arrayOf("全部", "TCP", "UDP", "ICMP", "HTTP", "HTTPS")
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, protocols)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        protocolSpinner.adapter = adapter
     }
     
     private fun applyFilters() {
-        // 简化版筛选，仅将所有包复制到filteredPackets
         filteredPackets.clear()
-        filteredPackets.addAll(allPackets)
+        
+        val filterText = filterEditText.text.toString().lowercase().trim()
+        val selectedProtocol = protocolSpinner.selectedItem.toString()
+        
+        for (packet in allPackets) {
+            var shouldInclude = true
+            
+            // 协议筛选
+            if (selectedProtocol != "全部") {
+                when (selectedProtocol) {
+                    "HTTP" -> shouldInclude = packet.destPort == 80 || packet.sourcePort == 80
+                    "HTTPS" -> shouldInclude = packet.destPort == 443 || packet.sourcePort == 443
+                    else -> shouldInclude = packet.protocol.equals(selectedProtocol, ignoreCase = true)
+                }
+            }
+            
+            // 文本筛选（IP地址或端口）
+            if (shouldInclude && filterText.isNotEmpty()) {
+                shouldInclude = packet.sourceIp.contains(filterText) ||
+                        packet.destIp.contains(filterText) ||
+                        packet.sourcePort.toString().contains(filterText) ||
+                        packet.destPort.toString().contains(filterText) ||
+                        packet.protocol.lowercase().contains(filterText)
+            }
+            
+            if (shouldInclude) {
+                filteredPackets.add(packet)
+            }
+        }
+        
         listAdapter.notifyDataSetChanged()
     }
     
@@ -145,25 +256,60 @@ class MainActivity : AppCompatActivity() {
         allPackets.clear()
         filteredPackets.clear()
         listAdapter.notifyDataSetChanged()
-        val intent = Intent(this, com.trafficcapture.VpnService::class.java).apply {
-            action = com.trafficcapture.VpnService.ACTION_START
+        
+        when (currentVpnMode) {
+            VpnMode.LIGHT -> {
+                // 使用LightVpnService进行最小干扰监控
+                val intent = Intent(this, LightVpnService::class.java).apply {
+                    action = "com.trafficcapture.START_LIGHT_VPN"
+                }
+                startService(intent)
+                statusText.text = "Status: Light VPN Monitoring..."
+            }
+            VpnMode.FULL -> {
+                // 使用FullVpnService进行完整数据包捕获
+                val intent = Intent(this, FullVpnService::class.java).apply {
+                    action = "com.trafficcapture.START_FULL_VPN"
+                }
+                startService(intent)
+                statusText.text = "Status: Full VPN Capturing..."
+            }
         }
-        startService(intent)
         updateUi(isCapturing = true)
     }
     
     private fun stopVpnService() {
-        val intent = Intent(this, com.trafficcapture.VpnService::class.java).apply {
-            action = com.trafficcapture.VpnService.ACTION_STOP
+        when (currentVpnMode) {
+            VpnMode.LIGHT -> {
+                // 停止LightVpnService
+                val intent = Intent(this, LightVpnService::class.java).apply {
+                    action = "com.trafficcapture.STOP_LIGHT_VPN"
+                }
+                startService(intent)
+            }
+            VpnMode.FULL -> {
+                // 停止FullVpnService
+                val intent = Intent(this, FullVpnService::class.java).apply {
+                    action = "com.trafficcapture.STOP_FULL_VPN"
+                }
+                startService(intent)
+            }
         }
-        startService(intent)
         updateUi(isCapturing = false)
     }
 
     private fun updateUi(isCapturing: Boolean) {
         this.isCapturing = isCapturing
         captureSwitch.isChecked = isCapturing
-        statusText.text = if (isCapturing) "Status: Capturing..." else "Status: Stopped"
+        if (isCapturing) {
+            val modeText = when (currentVpnMode) {
+                VpnMode.LIGHT -> "Light VPN Monitoring..."
+                VpnMode.FULL -> "Full VPN Capturing..."
+            }
+            statusText.text = "Status: $modeText"
+        } else {
+            statusText.text = "Status: Stopped"
+        }
     }
 
     override fun onDestroy() {
@@ -277,5 +423,31 @@ class MainActivity : AppCompatActivity() {
             .setMessage(guide)
             .setPositiveButton("确定") { _, _ -> }
             .show()
+    }
+    
+    private fun switchToVpnMode(mode: VpnMode) {
+        if (currentVpnMode == mode) return
+        
+        // 如果当前正在捕获，先停止
+        if (isCapturing) {
+            stopVpnService()
+        }
+        
+        currentVpnMode = mode
+        updateVpnModeButtons()
+        
+        // 重新启动VPN服务
+        if (isCapturing) {
+            startVpnService()
+        }
+    }
+    
+    private fun updateVpnModeButtons() {
+        btnLightVpn.isEnabled = currentVpnMode != VpnMode.LIGHT
+        btnFullVpn.isEnabled = currentVpnMode != VpnMode.FULL
+        
+        // 设置按钮背景色以显示当前模式
+        btnLightVpn.alpha = if (currentVpnMode == VpnMode.LIGHT) 0.5f else 1.0f
+        btnFullVpn.alpha = if (currentVpnMode == VpnMode.FULL) 0.5f else 1.0f
     }
 }

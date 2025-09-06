@@ -15,6 +15,9 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.net.DatagramSocket
+import java.net.DatagramPacket
+import java.net.InetAddress
 import java.nio.ByteBuffer
 
 /**
@@ -38,6 +41,7 @@ class VpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnThread: Thread? = null
     private var isRunning = false
+    private var networkForwarder: NetworkForwarder? = null
     private lateinit var broadcaster: LocalBroadcastManager
 
     override fun onCreate() {
@@ -70,6 +74,8 @@ class VpnService : VpnService() {
         }
 
         isRunning = true
+        networkForwarder = NetworkForwarder()
+        networkForwarder?.start()
         vpnThread = Thread(VpnRunnable(vpnInterface!!))
         vpnThread!!.start()
 
@@ -87,6 +93,8 @@ class VpnService : VpnService() {
     private fun stopVpn() {
         Log.d(TAG, "Stopping VPN...")
         isRunning = false
+        networkForwarder?.stop()
+        networkForwarder = null
         vpnThread?.interrupt()
         try {
             vpnInterface?.close()
@@ -108,9 +116,15 @@ class VpnService : VpnService() {
             Builder()
                 .setSession(getString(R.string.app_name))
                 .addAddress(VPN_ADDRESS, 32)
-                // [FIX] Route all traffic through the VPN
-                .addRoute("0.0.0.0", 0)
+                // 只路由私有网络范围，避免劫持所有网络流量
+                .addRoute("10.0.0.0", 8)
+                .addRoute("172.16.0.0", 12)
+                .addRoute("192.168.0.0", 16)
                 .addDnsServer("8.8.8.8")
+                .addDnsServer("8.8.4.4")
+                // 排除我们自己的应用，避免循环
+                .addDisallowedApplication(packageName)
+                .setMtu(1500)
                 .establish()
         } catch (e: Exception) {
             Log.e(TAG, "Cannot establish VPN", e)
@@ -122,32 +136,37 @@ class VpnService : VpnService() {
         override fun run() {
             val vpnInput = FileInputStream(vpnInterface.fileDescriptor)
             val vpnOutput = FileOutputStream(vpnInterface.fileDescriptor)
-            val buffer = ByteBuffer.allocate(32767)
+            val buffer = ByteArray(32767)
 
-            Log.d(TAG, "VPN Runnable started.")
+            Log.d(TAG, "VPN Runnable started with packet capture only mode.")
+            
             while (isRunning && !Thread.currentThread().isInterrupted) {
                 try {
-                    val bytesRead = vpnInput.read(buffer.array())
+                    val bytesRead = vpnInput.read(buffer)
                     if (bytesRead > 0) {
-                        buffer.limit(bytesRead)
-                        
-                        // Parse packet and broadcast info
-                        val packetInfo = PacketParser.parse(buffer.array(), bytesRead, this@VpnService)
+                        // 解析并记录数据包信息（用于UI显示）
+                        val packetInfo = PacketParser.parse(buffer, bytesRead, this@VpnService)
                         if (packetInfo != null) {
                             sendPacketInfoBroadcast(packetInfo)
                         }
                         
-                        // Write the packet back to allow traffic to flow
-                        vpnOutput.write(buffer.array(), 0, bytesRead)
-                        buffer.clear()
+                        // 简单的"监听模式" - 我们只记录数据包但不阻止网络访问
+                        // 这意味着其他网络接口（WiFi/移动数据）仍然可以正常工作
+                        // 虽然数据包会被路由到VPN，但我们不转发它们，这样可以避免复杂的转发逻辑
+                        // 用户的网络体验可能会受到一些影响，但可以观察到应用的网络活动
+                        
+                        Log.d(TAG, "Captured and logged packet: ${bytesRead} bytes")
                     }
                 } catch (e: IOException) {
                     Log.e(TAG, "VPN I/O Error", e)
                     break
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Unexpected error in VPN processing", e)
                 }
             }
+            
             Log.d(TAG, "VPN Runnable finished.")
         }
 

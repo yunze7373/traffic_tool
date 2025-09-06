@@ -46,19 +46,37 @@ object PacketParser {
         var payload: ByteArray? = null
         
         if (protocol == 6 /* TCP */ || protocol == 17 /* UDP */) {
-            if (buffer.limit() >= headerLength + 4) {
-                sourcePort = buffer.getShort(headerLength).toInt() and 0xFFFF
-                destPort = buffer.getShort(headerLength + 2).toInt() and 0xFFFF
-                
-                // 尝试解析HTTP内容
-                if (protocol == 6 && (sourcePort == 80 || destPort == 80 || sourcePort == 8080 || destPort == 8080)) {
-                    val tcpHeaderLength = ((buffer.get(headerLength + 12).toInt() and 0xFF) shr 4) * 4
+            if (length >= headerLength + 4) {
+                try {
+                    sourcePort = buffer.getShort(headerLength).toInt() and 0xFFFF
+                    destPort = buffer.getShort(headerLength + 2).toInt() and 0xFFFF
+                } catch (e: Exception) {
+                    Log.d(TAG, "Port parse error: ${e.message}")
+                }
+
+                if (protocol == 6 && length >= headerLength + 20) { // 至少存在最小TCP头
+                    val tcpHeaderLength = ((buffer.get(headerLength + 12).toInt() and 0xF0) shr 4) * 4
                     val dataOffset = headerLength + tcpHeaderLength
+                    if (dataOffset in 0 until length && dataOffset < length) {
+                        val payloadSize = length - dataOffset
+                        if (payloadSize > 0) {
+                            payload = ByteArray(payloadSize)
+                            System.arraycopy(packetData, dataOffset, payload, 0, payloadSize)
+                            // 尝试HTTP探测: 根据首行特征而不仅仅是端口
+                            if (looksLikeHttp(payload)) {
+                                httpInfo = parseHttpContent(payload)
+                            }
+                        }
+                    }
+                } else if (protocol == 17) { // UDP可根据端口判断是否DNS/QUIC等
+                    val udpHeaderLen = 8
+                    val dataOffset = headerLength + udpHeaderLen
                     if (dataOffset < length) {
                         val payloadSize = length - dataOffset
-                        payload = ByteArray(payloadSize)
-                        System.arraycopy(packetData, dataOffset, payload, 0, payloadSize)
-                        httpInfo = parseHttpContent(payload)
+                        if (payloadSize > 0 && payloadSize <= 4096) { // 限制大小
+                            payload = ByteArray(payloadSize)
+                            System.arraycopy(packetData, dataOffset, payload, 0, payloadSize)
+                        }
                     }
                 }
             }
@@ -148,6 +166,15 @@ object PacketParser {
             Log.d(TAG, "Failed to parse HTTP content: ${e.message}")
             return null
         }
+    }
+
+    private fun looksLikeHttp(payload: ByteArray): Boolean {
+        if (payload.isEmpty()) return false
+        val prefix = String(payload, 0, minOf(payload.size, 16), StandardCharsets.US_ASCII)
+        // 常见HTTP方法 或 HTTP响应头
+        return prefix.startsWith("GET ") || prefix.startsWith("POST ") || prefix.startsWith("HTTP/") ||
+               prefix.startsWith("PUT ") || prefix.startsWith("HEAD ") || prefix.startsWith("OPTIONS ") ||
+               prefix.startsWith("DELETE ") || prefix.startsWith("TRACE ") || prefix.startsWith("PATCH ")
     }
     
     private fun getAppInfo(sourcePort: Int, destPort: Int, context: Context?): Pair<String?, String?> {
