@@ -36,16 +36,18 @@ class RemoteProxyManager(private val context: Context) {
         private const val API_PORT = 5010
     }
     
-    private val websocketUrl = "wss://$SERVER_HOST:$WEBSOCKET_PORT"
-    private val apiUrl = "https://$SERVER_HOST:$API_PORT/api"
+    private val websocketUrl = "ws://$SERVER_HOST:$WEBSOCKET_PORT"
+    private val apiUrl = "http://$SERVER_HOST:$API_PORT/api"
     
     private var webSocket: WebSocket? = null
     private var isConnected = false
     
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)  // 增加连接超时
+        .readTimeout(60, TimeUnit.SECONDS)     // 增加读取超时
+        .writeTimeout(30, TimeUnit.SECONDS)    // 增加写入超时
+        .proxy(java.net.Proxy.NO_PROXY)       // 绕过系统代理设置
+        .retryOnConnectionFailure(true)        // 连接失败时重试
         .build()
     
     // 回调接口
@@ -62,8 +64,32 @@ class RemoteProxyManager(private val context: Context) {
     }
     
     fun startRemoteCapture() {
-        showProxyConfigDialog()
-        connectWebSocket()
+        // 先建立WebSocket连接，再显示配置对话框
+        GlobalScope.launch {
+            try {
+                val url = "$apiUrl/status"
+                val request = Request.Builder()
+                    .url(url)
+                    .build()
+                
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    Log.d(TAG, "服务器状态检查成功，开始连接WebSocket")
+                    connectWebSocket()
+                    
+                    // 延迟显示配置对话框，让用户先看到连接状态
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        showProxyConfigDialog()
+                    }, 2000)
+                } else {
+                    Log.e(TAG, "服务器状态检查失败: ${response.code}")
+                    callback?.onError("服务器不可用，状态码: ${response.code}")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "服务器连接检查失败", e)
+                callback?.onError("无法连接到服务器: ${e.message}")
+            }
+        }
     }
     
     fun stopRemoteCapture() {
@@ -71,10 +97,14 @@ class RemoteProxyManager(private val context: Context) {
     }
     
     private fun showProxyConfigDialog() {
+        val connectionStatus = if (isConnected) "✅ 已连接" else "❌ 未连接"
         val message = """
-            远程代理已准备就绪！
+            🌐 远程代理服务器状态: $connectionStatus
             
-            请按以下步骤配置手机代理：
+            ⚠️ 重要提示：
+            请在看到"已连接"状态后，再配置手机代理！
+            
+            📱 配置步骤：
             
             1️⃣ 打开设置 → WiFi
             2️⃣ 长按当前连接的WiFi网络
@@ -86,7 +116,7 @@ class RemoteProxyManager(private val context: Context) {
                端口: $PROXY_PORT
             7️⃣ 保存设置
             
-            配置完成后，所有网络流量将通过远程服务器，
+            🔄 配置完成后，所有网络流量将通过远程服务器，
             您可以在应用中实时查看抓包数据！
             
             💡 提示：如需HTTPS明文解密，请访问：
@@ -123,6 +153,9 @@ class RemoteProxyManager(private val context: Context) {
         val request = Request.Builder()
             .url(websocketUrl)
             .addHeader("User-Agent", "TrafficCapture-Android/1.0")
+            .addHeader("Origin", "http://bigjj.site")
+            .addHeader("Connection", "Upgrade")
+            .addHeader("Upgrade", "websocket")
             .build()
         
         webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
@@ -137,31 +170,49 @@ class RemoteProxyManager(private val context: Context) {
                     "device_id" to getDeviceId(),
                     "device_model" to android.os.Build.MODEL,
                     "android_version" to android.os.Build.VERSION.RELEASE,
-                    "app_version" to "1.0"
+                    "app_version" to "1.0",
+                    "timestamp" to System.currentTimeMillis()
                 )
-                webSocket.send(Gson().toJson(deviceInfo))
+                val registrationJson = Gson().toJson(deviceInfo)
+                Log.d(TAG, "发送设备注册信息: $registrationJson")
+                webSocket.send(registrationJson)
             }
             
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
-                    Log.d(TAG, "收到流量数据: ${text.take(100)}...")
+                    Log.d(TAG, "收到消息: ${text.take(200)}...")
+                    
+                    // 尝试解析为流量数据
                     val trafficData = Gson().fromJson(text, RemoteTrafficData::class.java)
                     callback?.onNewTraffic(trafficData)
                 } catch (e: Exception) {
-                    Log.e(TAG, "解析流量数据失败", e)
-                    callback?.onError("数据解析失败: ${e.message}")
+                    Log.d(TAG, "收到非流量数据消息: $text")
+                    // 可能是心跳或其他控制消息，不作为错误处理
                 }
             }
             
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WebSocket连接失败", t)
+                Log.e(TAG, "Response: ${response?.toString()}")
                 isConnected = false
                 callback?.onConnectionStateChanged(false)
-                callback?.onError("连接失败: ${t.message}")
                 
-                // 自动重连
+                val errorMsg = when {
+                    t.message?.contains("timeout") == true -> 
+                        "连接超时，请检查网络或稍后重试"
+                    t.message?.contains("unexpected end of stream") == true -> 
+                        "服务器WebSocket服务可能未启动"
+                    t.message?.contains("failed to connect") == true -> 
+                        "无法连接到服务器，请检查网络"
+                    t.message?.contains("refused") == true -> 
+                        "服务器拒绝连接，可能正在维护"
+                    else -> "连接失败: ${t.message}"
+                }
+                callback?.onError(errorMsg)
+                
+                // 延长重连间隔，避免频繁重试
                 GlobalScope.launch {
-                    delay(5000)
+                    delay(10000) // 10秒后重试
                     if (!isConnected) {
                         Log.d(TAG, "尝试重新连接...")
                         connectWebSocket()

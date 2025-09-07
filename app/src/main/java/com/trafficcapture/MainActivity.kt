@@ -13,6 +13,8 @@ import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
@@ -365,6 +367,9 @@ class MainActivity : AppCompatActivity() {
                 // 使用远程代理服务器
                 initializeRemoteProxy()
                 statusText.text = "Status: Connecting to Remote Proxy..."
+                
+                // 显示远程代理配置信息
+                showRemoteProxyInfo()
             }
         }
         updateUi(isCapturing = true)
@@ -677,6 +682,47 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e("MainActivity", "显示代理配置对话框失败", e)
         }
+    }
+    
+    private fun showRemoteProxyInfo() {
+        // 延迟一点时间让用户看到连接状态更新
+        Handler(Looper.getMainLooper()).postDelayed({
+            val serverInfo = remoteProxyManager?.getServerInfo() ?: "服务器信息获取失败"
+            val message = """
+                🌐 远程代理服务器信息
+                
+                $serverInfo
+                
+                📱 配置步骤：
+                1. 设置 → WiFi → 长按当前WiFi
+                2. 选择"修改网络"
+                3. 展开"高级选项"
+                4. 代理设置选择"手动"
+                5. 主机名: bigjj.site
+                6. 端口: 8888
+                7. 保存设置
+                
+                💡 提示：配置完成后可实时查看所有流量！
+            """.trimIndent()
+            
+            AlertDialog.Builder(this)
+                .setTitle("远程代理配置")
+                .setMessage(message)
+                .setPositiveButton("复制服务器") { _, _ ->
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("服务器", "bigjj.site")
+                    clipboard.setPrimaryClip(clip)
+                    Toast.makeText(this, "服务器地址已复制", Toast.LENGTH_SHORT).show()
+                }
+                .setNeutralButton("复制端口") { _, _ ->
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("端口", "8888")
+                    clipboard.setPrimaryClip(clip)
+                    Toast.makeText(this, "端口号已复制", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("确定", null)
+                .show()
+        }, 1000)
     }
     
     private fun initializeRemoteProxy() {

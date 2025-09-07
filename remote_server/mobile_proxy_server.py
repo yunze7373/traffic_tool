@@ -359,12 +359,15 @@ def main():
     print("=" * 60)
     
     try:
-        # 启动mitmproxy (主线程) - 只启动代理，不启动Web界面
+        # 启动mitmproxy (主线程) - 允许所有连接
         print("🔄 启动mitmproxy代理服务器...")
         mitmdump([
             "-s", __file__, 
             "--listen-port", "8888",
-            "--set", "confdir=~/.mitmproxy"
+            "--set", "confdir=~/.mitmproxy",
+            "--set", "block_global=false",  # 允许全球连接
+            "--set", "allow_hosts=.*",      # 允许所有主机
+            "--mode", "regular@8888"        # 明确指定代理模式
         ])
     except KeyboardInterrupt:
         print("\n🛑 服务器正在关闭...")
