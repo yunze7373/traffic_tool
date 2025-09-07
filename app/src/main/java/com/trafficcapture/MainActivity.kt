@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     // VPN模式按钮
     private lateinit var btnLightVpn: Button
     private lateinit var btnFullVpn: Button
+    private lateinit var btnSimpleVpn: Button
 
     private lateinit var listAdapter: PacketAdapter
     private lateinit var mitmListView: ListView
@@ -56,7 +57,8 @@ class MainActivity : AppCompatActivity() {
     
     enum class VpnMode {
         LIGHT,
-        FULL
+        FULL,
+        SIMPLE
     }
     
     private var isCapturing = false
@@ -74,6 +76,17 @@ class MainActivity : AppCompatActivity() {
         } else {
             Toast.makeText(this, "VPN permission denied. Cannot start capture.", Toast.LENGTH_LONG).show()
             updateUi(isCapturing = false)
+        }
+    }
+    
+    private val vpnStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val isRunning = intent?.getBooleanExtra(SimpleVpnService.EXTRA_RUNNING, false) ?: false
+            Log.d(TAG, "Simple VPN state changed: running=$isRunning")
+            
+            if (currentVpnMode == VpnMode.SIMPLE) {
+                updateUi(isCapturing = isRunning)
+            }
         }
     }
     
@@ -116,6 +129,7 @@ class MainActivity : AppCompatActivity() {
                 IntentFilter(FullVpnService.BROADCAST_PACKET_CAPTURED)
             )
             registerReceiver(mitmReceiver, IntentFilter(FullVpnService.BROADCAST_MITM_EVENT))
+            registerReceiver(vpnStateReceiver, IntentFilter(SimpleVpnService.BROADCAST_VPN_STATE))
         }
         
         httpsDecryptor = HttpsDecryptor(this)
@@ -139,6 +153,7 @@ class MainActivity : AppCompatActivity() {
         // 初始化VPN模式按钮
         btnLightVpn = findViewById(R.id.btnLightVpn)
         btnFullVpn = findViewById(R.id.btnFullVpn)
+        btnSimpleVpn = findViewById(R.id.btnSimpleVpn)
         
         // 设置初始按钮状态
         updateVpnModeButtons()
@@ -218,6 +233,10 @@ class MainActivity : AppCompatActivity() {
         
         btnFullVpn.setOnClickListener {
             switchToVpnMode(VpnMode.FULL)
+        }
+        
+        btnSimpleVpn.setOnClickListener {
+            switchToVpnMode(VpnMode.SIMPLE)
         }
     }
     
@@ -310,6 +329,14 @@ class MainActivity : AppCompatActivity() {
                 startService(intent)
                 statusText.text = "Status: Full VPN Capturing..."
             }
+            VpnMode.SIMPLE -> {
+                // 使用SimpleVpnService进行简化代理
+                val intent = Intent(this, SimpleVpnService::class.java).apply {
+                    action = "com.trafficcapture.START_SIMPLE_VPN"
+                }
+                startService(intent)
+                statusText.text = "Status: Simple VPN Running..."
+            }
         }
         updateUi(isCapturing = true)
     }
@@ -330,6 +357,13 @@ class MainActivity : AppCompatActivity() {
                 }
                 startService(intent)
             }
+            VpnMode.SIMPLE -> {
+                // 停止SimpleVpnService
+                val intent = Intent(this, SimpleVpnService::class.java).apply {
+                    action = "com.trafficcapture.STOP_SIMPLE_VPN"
+                }
+                startService(intent)
+            }
         }
         updateUi(isCapturing = false)
     }
@@ -341,6 +375,7 @@ class MainActivity : AppCompatActivity() {
             val modeText = when (currentVpnMode) {
                 VpnMode.LIGHT -> "Light VPN Monitoring..."
                 VpnMode.FULL -> "Full VPN Capturing..."
+                VpnMode.SIMPLE -> "Simple VPN Running..."
             }
             statusText.text = "Status: $modeText"
         } else {
@@ -542,9 +577,11 @@ class MainActivity : AppCompatActivity() {
     private fun updateVpnModeButtons() {
         btnLightVpn.isEnabled = currentVpnMode != VpnMode.LIGHT
         btnFullVpn.isEnabled = currentVpnMode != VpnMode.FULL
+        btnSimpleVpn.isEnabled = currentVpnMode != VpnMode.SIMPLE
         
         // 设置按钮背景色以显示当前模式
         btnLightVpn.alpha = if (currentVpnMode == VpnMode.LIGHT) 0.5f else 1.0f
         btnFullVpn.alpha = if (currentVpnMode == VpnMode.FULL) 0.5f else 1.0f
+        btnSimpleVpn.alpha = if (currentVpnMode == VpnMode.SIMPLE) 0.5f else 1.0f
     }
 }

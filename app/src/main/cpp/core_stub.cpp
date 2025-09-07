@@ -68,8 +68,12 @@ static int g_tun_fd = -1;
 static int g_mtu = 1500;
 static std::string g_socks;
 static std::string g_dns;
+// 虚拟DNS地址（Java侧 FullVpnService 把 DNS 定向到 10.0.0.1，我们在这里拦截并转发到真实 g_dns）
+static const char* VIRTUAL_DNS_IP = "10.0.0.1";
 static int g_log_level = 1; // 0=DEBUG, 1=INFO, 2=WARN
 static void (*g_cb)(int,int,const char*,int,const char*,int,const uint8_t*,int) = nullptr;
+// Java层传入的 protect(fd) 回调，用于让 socket 绕过本VPN
+static int (*g_protect_cb)(int fd) = nullptr;
 
 // 会话管理
 static std::mutex g_sessions_mutex;
@@ -291,177 +295,10 @@ static bool parse_ip_packet(const uint8_t* data, int len,
     return true;
 }
 
-// 处理TCP数据包
-static void handle_tcp_packet(const std::string& src_ip, const std::string& dst_ip,
-                              const uint8_t* tcp_data, int tcp_len) {
-    if (tcp_len < 20) return; // 最小TCP头长度
-    
-    struct tcphdr* tcp = (struct tcphdr*)tcp_data;
-    uint16_t src_port = ntohs(tcp->source);
-    uint16_t dst_port = ntohs(tcp->dest);
-    
-    // 添加调试日志来追踪所有TCP包
-    int tcp_header_len = tcp->doff * 4;
-    int payload_len = tcp_len - tcp_header_len;
-    if (payload_len > 0) {
-        CORE_LOGI("TCP packet with payload: %s:%d -> %s:%d (%d bytes, flags: SYN=%d ACK=%d FIN=%d)", 
-                 src_ip.c_str(), src_port, dst_ip.c_str(), dst_port, payload_len, tcp->syn, tcp->ack, tcp->fin);
-    }    uint64_t key = make_session_key(src_ip, src_port, dst_ip, dst_port, IPPROTO_TCP);
-    
-    std::lock_guard<std::mutex> lock(g_sessions_mutex);
-    auto it = g_tcp_sessions.find(key);
-    
-    if (tcp->syn && !tcp->ack) {
-        // 新连接SYN包
-        if (it != g_tcp_sessions.end()) {
-            // 关闭旧连接
-            if (it->second.socket_fd >= 0) {
-                close(it->second.socket_fd);
-            }
-        }
-        
-        // 创建新socket连接到目标（或SOCKS代理）
-        int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock_fd < 0) {
-            CORE_LOGE("Failed to create socket: %s", strerror(errno));
-            return;
-        }
-        
-        set_nonblocking(sock_fd);
-        
-        // 连接到目标服务器：检查是否需要通过代理
-        struct sockaddr_in addr = {};
-        addr.sin_family = AF_INET;
-        
-        // 如果配置了SOCKS代理且目标是HTTPS(443端口)，通过代理连接
-        if (!g_socks.empty() && dst_port == 443) {
-            // 解析SOCKS代理地址
-            size_t colon_pos = g_socks.find(':');
-            if (colon_pos != std::string::npos) {
-                std::string proxy_host = g_socks.substr(0, colon_pos);
-                uint16_t proxy_port = static_cast<uint16_t>(std::stoi(g_socks.substr(colon_pos + 1)));
-                
-                addr.sin_port = htons(proxy_port);
-                inet_aton(proxy_host.c_str(), &addr.sin_addr);
-                
-                if (g_log_level <= 1) {
-                    CORE_LOGI("HTTPS connection via proxy: %s:%d -> %s:%d (via %s)", 
-                             src_ip.c_str(), src_port, dst_ip.c_str(), dst_port, g_socks.c_str());
-                }
-            } else {
-                // 代理配置错误，直连
-                addr.sin_port = htons(dst_port);
-                inet_aton(dst_ip.c_str(), &addr.sin_addr);
-            }
-        } else {
-            // 直连到目标服务器
-            addr.sin_port = htons(dst_port);
-            inet_aton(dst_ip.c_str(), &addr.sin_addr);
-        }
-        
-        TcpSession session;
-        session.socket_fd = sock_fd;
-        session.src_ip = src_ip;
-        session.src_port = src_port;
-        session.dst_ip = dst_ip;
-        session.dst_port = dst_port;
-        session.client_seq = ntohl(tcp->seq);
-        session.state = STATE_CONNECTING;
-        session.last_activity = std::chrono::steady_clock::now();
-        
-        g_tcp_sessions[key] = session;
-        
-        // 非阻塞connect
-        int result = connect(sock_fd, (struct sockaddr*)&addr, sizeof(addr));
-        CORE_LOGI("Connect to proxy result: %d, errno: %s", result, strerror(errno));
-        if (result == 0 || errno == EINPROGRESS) {
-            // 添加到epoll监控
-            struct epoll_event ev = {};
-            ev.events = EPOLLOUT | EPOLLIN | EPOLLET;
-            ev.data.u64 = key;
-            int epoll_result = epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, sock_fd, &ev);
-            CORE_LOGI("Epoll add result: %d for socket %d, key: %llu", epoll_result, sock_fd, key);
-            
-            // 如果是通过代理的HTTPS连接，需要发送CONNECT请求
-            if (!g_socks.empty() && dst_port == 443) {
-                // 标记为需要发送CONNECT，但不立即发送SYN-ACK给客户端
-                session.state = STATE_PROXY_CONNECT;
-                g_tcp_sessions[key] = session;
-                CORE_LOGI("Proxy connection initiated: %s:%d -> %s:%d", 
-                         src_ip.c_str(), src_port, dst_ip.c_str(), dst_port);
-            } else {
-                // 立即发送SYN-ACK响应给客户端（非代理连接）
-                sendTcpSynAck(g_tun_fd, src_ip, src_port, dst_ip, dst_port, session.client_seq);
-                session.state = STATE_ESTABLISHED;
-                g_tcp_sessions[key] = session;
-            }
-            
-            if (g_log_level <= 1) {
-                CORE_LOGI("New TCP connection: %s:%d -> %s:%d", 
-                         src_ip.c_str(), src_port, dst_ip.c_str(), dst_port);
-            }
-        } else {
-            CORE_LOGE("Connect failed: %s", strerror(errno));
-            close(sock_fd);
-            g_tcp_sessions.erase(key);
-        }
-    } else if (it != g_tcp_sessions.end()) {
-        // 现有连接的数据包
-        TcpSession& session = it->second;
-        session.last_activity = std::chrono::steady_clock::now();
-        
-        CORE_LOGI("Found existing session: %s:%d -> %s:%d, state=%d", 
-                 src_ip.c_str(), src_port, dst_ip.c_str(), dst_port, session.state);
-        
-        int tcp_header_len = tcp->doff * 4;
-        const uint8_t* payload = tcp_data + tcp_header_len;
-        int payload_len = tcp_len - tcp_header_len;
-        
-        if (payload_len > 0 && session.socket_fd >= 0) {
-            if (session.state == STATE_ESTABLISHED) {
-                CORE_LOGI("About to forward %d bytes from %s:%d to proxy", payload_len, src_ip.c_str(), src_port);
-                // 转发payload到远端（直连或已建立的代理隧道）
-                ssize_t sent = send(session.socket_fd, payload, payload_len, MSG_NOSIGNAL);
-                if (sent > 0) {
-                    CORE_LOGI("Successfully forwarded %d bytes to proxy", (int)sent);
-                    if (g_cb) {
-                        // 回调uplink数据 (方向0: 客户端->网络)
-                        int callback_len = std::min(payload_len, 4096); // 限制回调数据大小
-                        g_cb(0, IPPROTO_TCP, src_ip.c_str(), src_port, dst_ip.c_str(), dst_port, 
-                             payload, callback_len);
-                    }
-                } else {
-                    CORE_LOGE("Failed to forward data to proxy: %s", strerror(errno));
-                }
-                if (g_log_level <= 1) { // 改为INFO级别也显示
-                    CORE_LOGI("Forwarded TCP data: %s:%d -> %s:%d (%d bytes)", 
-                             src_ip.c_str(), src_port, dst_ip.c_str(), dst_port, (int)sent);
-                }
-            } else if (session.state == STATE_PROXY_CONNECT) {
-                // 正在建立代理连接期间，缓存客户端数据
-                CORE_LOGI("Caching TCP data during proxy connection: %d bytes", payload_len);
-                std::vector<uint8_t> data(payload, payload + payload_len);
-                session.pending_data.push_back(data);
-            } else if (session.state == STATE_PROXY_RESPONSE) {
-                // 等待代理响应期间，缓存客户端数据
-                CORE_LOGI("Caching TCP data during proxy handshake: %d bytes", payload_len);
-                std::vector<uint8_t> data(payload, payload + payload_len);
-                session.pending_data.push_back(data);
-            }
-        }
-        
-        if (tcp->fin || tcp->rst) {
-            // 连接关闭
-            session.state = STATE_CLOSING;
-        }
-    }
-}
-
-// 处理UDP数据包
-static void handle_udp_packet(const std::string& src_ip, const std::string& dst_ip,
-                             const uint8_t* udp_data, int udp_len) {
+// UDP数据包处理
+static void handle_udp_packet(const std::string& src_ip, const std::string& dst_ip, const uint8_t* udp_data, int udp_len) {
     if (udp_len < 8) return; // 最小UDP头长度
-    
+
     struct udphdr* udp = (struct udphdr*)udp_data;
     uint16_t src_port = ntohs(udp->source);
     uint16_t dst_port = ntohs(udp->dest);
@@ -469,17 +306,25 @@ static void handle_udp_packet(const std::string& src_ip, const std::string& dst_
     const uint8_t* payload = udp_data + 8;
     int payload_len = udp_len - 8;
     
-    uint64_t key = make_session_key(src_ip, src_port, dst_ip, dst_port, IPPROTO_UDP);
+    std::string vpn_src_ip = "10.0.0.2";
+    uint64_t key = make_session_key(vpn_src_ip, src_port, dst_ip, dst_port, IPPROTO_UDP);
     
     std::lock_guard<std::mutex> lock(g_sessions_mutex);
     auto it = g_udp_sessions.find(key);
     
     if (it == g_udp_sessions.end()) {
-        // 新UDP会话
+        // 创建新的UDP会话
         int sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
         if (sock_fd < 0) {
             CORE_LOGE("Failed to create UDP socket: %s", strerror(errno));
             return;
+        }
+        
+        if (g_protect_cb) {
+            int ok = g_protect_cb(sock_fd);
+            if (!ok) {
+                CORE_LOGW("protect() failed for UDP fd=%d", sock_fd);
+            }
         }
         
         set_nonblocking(sock_fd);
@@ -487,17 +332,15 @@ static void handle_udp_packet(const std::string& src_ip, const std::string& dst_
         UdpSession session;
         session.socket_fd = sock_fd;
         session.src_ip = src_ip;
-        session.src_port = src_port;
+        session.src_port = src_port; 
         session.dst_ip = dst_ip;
         session.dst_port = dst_port;
         session.last_activity = std::chrono::steady_clock::now();
-        
         g_udp_sessions[key] = session;
         
-        // 添加到epoll监控
         struct epoll_event ev = {};
         ev.events = EPOLLIN | EPOLLET;
-        ev.data.u64 = key | (1ULL << 63); // 设置最高位标识UDP
+        ev.data.u64 = key | (1ULL << 63); // 设置UDP标记位
         epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, sock_fd, &ev);
         
         if (g_log_level <= 1) {
@@ -509,20 +352,173 @@ static void handle_udp_packet(const std::string& src_ip, const std::string& dst_
     if (payload_len > 0) {
         auto& session = g_udp_sessions[key];
         session.last_activity = std::chrono::steady_clock::now();
-        
-        // 发送到目标
+
+        // 判定是否为指向虚拟DNS的查询，如果是则改写真实目的地址为 g_dns
+        std::string real_target_ip = dst_ip;
+        uint16_t real_target_port = dst_port;
+        bool is_virtual_dns_query = false;
+        if (dst_port == 53 && dst_ip == VIRTUAL_DNS_IP) {
+            if (!g_dns.empty()) {
+                real_target_ip = g_dns; // 使用真实上游DNS
+                is_virtual_dns_query = true;
+            }
+        }
+
+        // 发送到真实目标（普通流量或改写后的DNS）
         struct sockaddr_in addr = {};
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(dst_port);
-        inet_aton(dst_ip.c_str(), &addr.sin_addr);
-        
+        addr.sin_port = htons(real_target_port);
+        inet_aton(real_target_ip.c_str(), &addr.sin_addr);
+
         ssize_t sent = sendto(session.socket_fd, payload, payload_len, MSG_NOSIGNAL,
-                             (struct sockaddr*)&addr, sizeof(addr));
-        if (sent > 0 && g_cb) {
-            // 回调uplink数据
-            int callback_len = std::min(payload_len, 4096);
-            g_cb(0, IPPROTO_UDP, src_ip.c_str(), src_port, dst_ip.c_str(), dst_port,
-                 payload, callback_len);
+                              (struct sockaddr*)&addr, sizeof(addr));
+        if (sent > 0) {
+            if (is_virtual_dns_query) {
+                CORE_LOGI("Forward DNS query %s:%d -> %s (virtual %s:53)",
+                          src_ip.c_str(), src_port, g_dns.c_str(), VIRTUAL_DNS_IP);
+            }
+            if (g_cb) {
+                int callback_len = std::min(payload_len, 4096);
+                // 回调仍然使用原始 (dst_ip,dst_port)，这样上层看到的是虚拟DNS地址
+                g_cb(0, IPPROTO_UDP, src_ip.c_str(), src_port, dst_ip.c_str(), dst_port,
+                     payload, callback_len);
+            }
+        } else {
+            CORE_LOGE("Failed to send UDP (%s:%d -> %s:%d real=%s:%d): %s", 
+                      src_ip.c_str(), src_port, dst_ip.c_str(), dst_port,
+                      real_target_ip.c_str(), real_target_port, strerror(errno));
+        }
+    }
+}
+
+// 处理TCP数据包
+static void handle_tcp_packet(const std::string& src_ip, const std::string& dst_ip, const uint8_t* tcp_data, int tcp_len) {
+    if (tcp_len < 20) return; // 最小TCP头长度
+    
+    struct tcphdr* tcp = (struct tcphdr*)tcp_data;
+    uint16_t src_port = ntohs(tcp->source);
+    uint16_t dst_port = ntohs(tcp->dest);
+    
+    // 将源IP转换为VPN内部IP以匹配会话
+    std::string vpn_src_ip = "10.0.0.2";
+    
+    // 添加调试日志来追踪所有TCP包
+    int tcp_header_len = tcp->doff * 4;
+    int payload_len = tcp_len - tcp_header_len;
+    const uint8_t* payload = tcp_data + tcp_header_len;
+    
+    if (payload_len > 0) {
+        CORE_LOGI("TCP packet with payload: %s:%d -> %s:%d (%d bytes, flags: SYN=%d ACK=%d FIN=%d)",
+                  src_ip.c_str(), src_port, dst_ip.c_str(), dst_port, payload_len, tcp->syn, tcp->ack, tcp->fin);
+    } else {
+        // 记录纯控制包（SYN/ACK 等）方便调试握手阶段
+        CORE_LOGI("TCP packet (no payload): %s:%d -> %s:%d (flags SYN=%d ACK=%d FIN=%d RST=%d)",
+                  src_ip.c_str(), src_port, dst_ip.c_str(), dst_port, tcp->syn, tcp->ack, tcp->fin, tcp->rst);
+    }
+    uint64_t key = make_session_key(vpn_src_ip, src_port, dst_ip, dst_port, IPPROTO_TCP);
+    CORE_LOGI("TCP packet processing: key=%llu, src=%s:%d, dst=%s:%d", 
+             (unsigned long long)key, vpn_src_ip.c_str(), src_port, dst_ip.c_str(), dst_port);
+
+    std::lock_guard<std::mutex> lock(g_sessions_mutex);
+    auto it = g_tcp_sessions.find(key);
+
+    // 如果会话不存在且是SYN新建连接，创建会话
+    if (it == g_tcp_sessions.end()) {
+        CORE_LOGI("TCP session lookup failed for %s:%d -> %s:%d, SYN=%d ACK=%d", 
+                 vpn_src_ip.c_str(), src_port, dst_ip.c_str(), dst_port, tcp->syn, tcp->ack);
+        if (tcp->syn && !tcp->ack) {
+            // 创建新socket连接到目标（或SOCKS代理）
+            int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+            if (sock_fd < 0) {
+                CORE_LOGE("Failed to create socket: %s", strerror(errno));
+                return;
+            }
+
+            if (g_protect_cb) {
+                int ok = g_protect_cb(sock_fd);
+                if (!ok) {
+                    CORE_LOGW("protect() failed for TCP fd=%d", sock_fd);
+                } else {
+                    CORE_LOGI("protect() applied to TCP fd=%d", sock_fd);
+                }
+            } else {
+                CORE_LOGW("No protect callback available for TCP fd=%d", sock_fd);
+            }
+
+            set_nonblocking(sock_fd);
+
+            struct sockaddr_in addr = {}; addr.sin_family = AF_INET;
+            if (!g_socks.empty() && dst_port == 443) {
+                size_t colon_pos = g_socks.find(':');
+                if (colon_pos != std::string::npos) {
+                    std::string proxy_host = g_socks.substr(0, colon_pos);
+                    uint16_t proxy_port = static_cast<uint16_t>(std::stoi(g_socks.substr(colon_pos + 1)));
+                    addr.sin_port = htons(proxy_port);
+                    inet_aton(proxy_host.c_str(), &addr.sin_addr);
+                    if (g_log_level <= 1) {
+                        CORE_LOGI("HTTPS connection via proxy: %s:%d -> %s:%d (via %s)", src_ip.c_str(), src_port, dst_ip.c_str(), dst_port, g_socks.c_str());
+                    }
+                } else {
+                    addr.sin_port = htons(dst_port); inet_aton(dst_ip.c_str(), &addr.sin_addr);
+                }
+            } else {
+                addr.sin_port = htons(dst_port); inet_aton(dst_ip.c_str(), &addr.sin_addr);
+            }
+
+            TcpSession newSession{};
+            newSession.socket_fd = sock_fd;
+            newSession.src_ip = src_ip;
+            newSession.src_port = src_port;
+            newSession.dst_ip = dst_ip;
+            newSession.dst_port = dst_port;
+            newSession.client_seq = ntohl(tcp->seq);
+            newSession.state = STATE_CONNECTING;
+            newSession.last_activity = std::chrono::steady_clock::now();
+            g_tcp_sessions[key] = newSession;
+
+            CORE_LOGI("Creating new TCP session (patch v1) for %s:%d -> %s:%d", src_ip.c_str(), src_port, dst_ip.c_str(), dst_port);
+            CORE_LOGI("About to connect to addr: %s:%d (socks=%s)", dst_ip.c_str(), dst_port, g_socks.c_str());
+            int result = connect(sock_fd, (struct sockaddr*)&addr, sizeof(addr));
+            CORE_LOGI("Connect to proxy result: %d, errno: %s", result, strerror(errno));
+            if (result == 0 || errno == EINPROGRESS) {
+                struct epoll_event ev = {}; ev.events = EPOLLOUT | EPOLLIN | EPOLLET; ev.data.u64 = key;
+                int epoll_result = epoll_ctl(g_epoll_fd, EPOLL_CTL_ADD, sock_fd, &ev);
+                CORE_LOGI("Epoll add result: %d for socket %d, key: %llu", epoll_result, sock_fd, (unsigned long long)key);
+                if (!g_socks.empty() && dst_port == 443) {
+                    newSession.state = STATE_PROXY_CONNECT; g_tcp_sessions[key] = newSession;
+                    CORE_LOGI("Proxy connection initiated: %s:%d -> %s:%d", src_ip.c_str(), src_port, dst_ip.c_str(), dst_port);
+                } else {
+                    sendTcpSynAck(g_tun_fd, src_ip, src_port, dst_ip, dst_port, newSession.client_seq);
+                    newSession.state = STATE_ESTABLISHED; g_tcp_sessions[key] = newSession;
+                }
+                if (g_log_level <= 1) {
+                    CORE_LOGI("New TCP connection: %s:%d -> %s:%d", src_ip.c_str(), src_port, dst_ip.c_str(), dst_port);
+                }
+            } else {
+                CORE_LOGE("Connect failed: %s", strerror(errno));
+                close(sock_fd); g_tcp_sessions.erase(key);
+            }
+        } else {
+            // 非SYN包却没会话，忽略
+            CORE_LOGI("Session not found (non-SYN) for key: %s:%d -> %s:%d", vpn_src_ip.c_str(), src_port, dst_ip.c_str(), dst_port);
+        }
+        return; // 处理完SYN或忽略
+    }
+
+    // 现有连接的数据包
+    TcpSession& session = it->second;
+    session.last_activity = std::chrono::steady_clock::now();
+    
+    if (payload_len > 0) {
+        ssize_t sent = send(session.socket_fd, payload, payload_len, MSG_NOSIGNAL);
+        if (sent > 0) {
+            if (g_cb) {
+                int callback_len = std::min(payload_len, 4096);
+                g_cb(0, IPPROTO_TCP, src_ip.c_str(), src_port, dst_ip.c_str(), dst_port,
+                     payload, callback_len);
+            }
+        } else {
+            CORE_LOGE("Failed to send TCP data: %s", strerror(errno));
         }
     }
 }
@@ -551,6 +547,8 @@ static void main_event_loop() {
         int nfds = epoll_wait(g_epoll_fd, events.data(), events.size(), 1000);
         
         for (int i = 0; i < nfds; i++) {
+            CORE_LOGI("Epoll event %d: fd=%d, u64=%llu, events=0x%x (g_tun_fd=%d)", 
+                     i, events[i].data.fd, (unsigned long long)events[i].data.u64, events[i].events, g_tun_fd);
             if (events[i].data.fd == g_tun_fd) {
                 // TUN接口数据
                 ssize_t len = read(g_tun_fd, buffer, sizeof(buffer));
@@ -571,9 +569,10 @@ static void main_event_loop() {
             } else {
                 // Socket数据
                 uint64_t key = events[i].data.u64;
-                bool is_udp = (key & (1ULL << 63)) != 0;
-                key &= ~(1ULL << 63);
+                CORE_LOGI("Socket event: key=%llu", (unsigned long long)key);
                 
+                // 检查是否是UDP会话（高位标记）
+                bool is_udp = (key & (1ULL << 63)) != 0;
                 if (is_udp) {
                     // UDP响应数据
                     std::lock_guard<std::mutex> lock(g_sessions_mutex);
@@ -581,6 +580,13 @@ static void main_event_loop() {
                     if (it != g_udp_sessions.end()) {
                         ssize_t len = recv(it->second.socket_fd, buffer, sizeof(buffer), MSG_NOSIGNAL);
                         if (len > 0) {
+                            // 如果是上游DNS返回且之前改写过目标，可以在这里（需要的话）添加还原逻辑。
+                            // 当前实现保持写回时仍用会话原始(dst/src)信息构造，符合上层预期。
+                            if (g_log_level <= 0 && it->second.dst_port == 53) {
+                                CORE_LOGI("Received UDP response %s:%d <- %s:%d (%d bytes)",
+                                          it->second.src_ip.c_str(), it->second.src_port,
+                                          it->second.dst_ip.c_str(), it->second.dst_port, (int)len);
+                            }
                             if (g_cb) {
                                 // 回调downlink数据 (方向1: 网络->客户端)
                                 int callback_len = std::min((int)len, 4096);
@@ -594,6 +600,7 @@ static void main_event_loop() {
                     }
                 } else {
                     // TCP响应数据
+                    CORE_LOGI("TCP socket event: key=%llu", (unsigned long long)key);
                     std::lock_guard<std::mutex> lock(g_sessions_mutex);
                     auto it = g_tcp_sessions.find(key);
                     if (it != g_tcp_sessions.end()) {
@@ -691,6 +698,8 @@ static void main_event_loop() {
                                 }
                             }
                         }
+                    } else {
+                        CORE_LOGW("TCP session not found for key: %llu", (unsigned long long)key);
                     }
                 }
             }
@@ -709,7 +718,7 @@ extern "C" int tt_init(int tun_fd, const char* socks_server, const char* dns_ser
     g_mtu = mtu;
     g_socks = socks_server ? socks_server : "";
     g_dns = dns_server ? dns_server : "";
-    CORE_LOGI("tt_init tun_fd=%d mtu=%d socks=%s dns=%s", tun_fd, mtu, g_socks.c_str(), g_dns.c_str());
+    CORE_LOGI("tt_init NEW VERSION tun_fd=%d mtu=%d socks=%s dns=%s", tun_fd, mtu, g_socks.c_str(), g_dns.c_str());
     return 0;
 }
 
@@ -755,4 +764,9 @@ extern "C" const char* tt_version() {
 extern "C" void tt_register_callback(void (*cb)(int,int,const char*,int,const char*,int,const uint8_t*,int)) {
     g_cb = cb;
     CORE_LOGI("tt_register_callback set=%p", (void*)cb);
+}
+
+extern "C" void tt_set_protect_callback(int (*protect_cb)(int)) {
+    g_protect_cb = protect_cb;
+    CORE_LOGI("tt_set_protect_callback set=%p", (void*)protect_cb);
 }

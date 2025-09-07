@@ -1,14 +1,20 @@
 package com.trafficcapture.mitm
 
+import android.net.VpnService
 import com.trafficcapture.HttpsDecryptor
-import com.trafficcapture.PacketInfo
 import kotlinx.coroutines.*
 import java.net.*
 import java.io.*
 import android.util.Log
+import java.io.Serializable
 import javax.net.ssl.*
 
+/**
+ * [FINAL FIX] Resolves the type mismatch error by ensuring the hostname is not null
+ * before proceeding with the TLS handling logic.
+ */
 class MitmProxyManager(
+    private val vpnService: VpnService,
     private val decryptor: HttpsDecryptor,
     private val eventCallback: (MitmEvent) -> Unit,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -34,152 +40,106 @@ class MitmProxyManager(
 
     private fun handleClient(client: Socket) {
         scope.launch {
-            client.soTimeout = 20000
+            client.soTimeout = 120000
             val inBuf = BufferedInputStream(client.getInputStream())
             val out = BufferedOutputStream(client.getOutputStream())
             var targetHost: String? = null
             var targetPort = 443
             try {
-                inBuf.mark(8192)
-                val peek = ByteArray(8192)
-                val read = inBuf.read(peek)
-                if (read <= 0) return@launch
-                val header = String(peek, 0, read)
-                if (header.startsWith("CONNECT ")) {
-                    // CONNECT host:port HTTP/1.1
-                    val line = header.lineSequence().firstOrNull() ?: ""
-                    val hostPort = line.split(" ").getOrNull(1) ?: ""
-                    val hp = hostPort.split(":")
-                    targetHost = hp.getOrNull(0)
-                    targetPort = hp.getOrNull(1)?.toIntOrNull() ?: 443
-                    out.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: TrafficTool\r\n\r\n".toByteArray())
-                    out.flush()
-                    // 重新读后续 TLS ClientHello
-                    inBuf.reset()
-                    inBuf.mark(8192)
-                    val again = inBuf.read(peek)
-                    if (again <= 0) return@launch
-                } else {
-                    // 直接 HTTP 明文
-                    val parsed = HttpStreamParser.parseMessage(ByteArrayInputStream(peek,0,read))
-                    eventCallback(
-                        MitmEvent.Legacy(
-                            type = MitmEvent.Type.REQUEST,
-                            direction = MitmEvent.Direction.OUTBOUND,
-                            hostname = extractHost(parsed?.headers, targetHost),
-                            method = parsed?.method,
-                            url = parsed?.url,
-                            headers = parsed?.headers ?: emptyMap(),
-                            payloadPreview = parsed?.bodyPreview
-                        )
-                    )
-                    // 透传：简单实现（不转发上游，这里可拓展）
+                val initialRequest = readInitialRequest(inBuf)
+                if (initialRequest.isBlank()) {
+                    client.close()
                     return@launch
                 }
-
-                // TLS 检测 & SNI
-                val sniff = TlsSniffer.peekClientHello(peek.copyOf(read))
-                if (sniff.isTls) {
-                    targetHost = sniff.sni ?: targetHost
-                    if (targetHost == null) { Log.w(TAG, "No SNI, abort TLS MITM"); return@launch }
-                    // 回退指针，让 SSLSocket 自行读取 ClientHello
-                    inBuf.reset()
-                    val serverCtx = decryptor.buildServerSSLContextForHost(targetHost!!)
-                    if (serverCtx == null) { Log.w(TAG, "Server SSLContext null, abort"); return@launch }
-                    val sslSocket = serverCtx.socketFactory.createSocket(client, client.inetAddress.hostAddress, client.port, false) as SSLSocket
-                    try { sslSocket.useClientMode = false } catch (_: Exception) {}
-                    try { sslSocket.startHandshake() } catch (e: Exception) { Log.w(TAG, "Client TLS handshake fail: ${e.message}"); return@launch }
-
-                    // 上游真实 TLS 连接
-                    val upstreamFactory = decryptor.createSSLSocketFactory()
-                    val upstream = upstreamFactory.createSocket(targetHost, targetPort) as SSLSocket
-                    try { upstream.startHandshake() } catch (e: Exception) { Log.w(TAG, "Upstream handshake fail: ${e.message}"); return@launch }
-
-                    val clientIn = BufferedInputStream(sslSocket.inputStream)
-                    val clientOut = BufferedOutputStream(sslSocket.outputStream)
-                    val upstreamIn = BufferedInputStream(upstream.inputStream)
-                    val upstreamOut = BufferedOutputStream(upstream.outputStream)
-
-                    // 解析首个请求
-                    val reqParsed = HttpStreamParser.parseMessage(clientIn)
-                    reqParsed?.let {
-                        eventCallback(
-                            MitmEvent.Legacy(
-                                type = MitmEvent.Type.REQUEST,
-                                direction = MitmEvent.Direction.OUTBOUND,
-                                hostname = targetHost,
-                                method = it.method,
-                                url = it.url,
-                                headers = it.headers,
-                                payloadPreview = it.bodyPreview
-                            )
-                        )
-                        // 重建并转发首个请求头+体
-                        val builder = StringBuilder()
-                        builder.append(it.startLine).append("\r\n")
-                        it.headers.forEach { (k,v) -> builder.append(k).append(": ").append(v).append("\r\n") }
-                        builder.append("\r\n")
-                        upstreamOut.write(builder.toString().toByteArray())
-                        it.bodyPreview?.let { bodyPrev -> upstreamOut.write(bodyPrev.toByteArray()) }
-                        upstreamOut.flush()
+                
+                if (initialRequest.startsWith("CONNECT ")) {
+                    val hostPort = initialRequest.split(" ").getOrNull(1)
+                    val parts = hostPort?.split(":")
+                    targetHost = parts?.getOrNull(0)
+                    targetPort = parts?.getOrNull(1)?.toIntOrNull() ?: 443
+                    
+                    if (targetHost == null) {
+                        Log.e(TAG, "Could not parse host from CONNECT request: '$initialRequest'")
+                        client.close()
+                        return@launch
                     }
-
-                    // 解析首个响应
-                    val respParsed = HttpStreamParser.parseMessage(upstreamIn)
-                    respParsed?.let {
-                        eventCallback(
-                            MitmEvent.Legacy(
-                                type = MitmEvent.Type.RESPONSE,
-                                direction = MitmEvent.Direction.INBOUND,
-                                hostname = targetHost,
-                                statusCode = it.statusCode,
-                                headers = it.headers,
-                                payloadPreview = it.bodyPreview
-                            )
-                        )
-                        val builder = StringBuilder()
-                        builder.append(it.startLine).append("\r\n")
-                        it.headers.forEach { (k,v) -> builder.append(k).append(": ").append(v).append("\r\n") }
-                        builder.append("\r\n")
-                        clientOut.write(builder.toString().toByteArray())
-                        it.bodyPreview?.let { bodyPrev -> clientOut.write(bodyPrev.toByteArray()) }
-                        clientOut.flush()
-                    }
-
-                    // 后续数据直接 relay (不再解析，留待扩展)
-                    val job1 = launch { relay(clientIn, upstreamOut, targetHost) }
-                    val job2 = launch { relay(upstreamIn, clientOut, targetHost) }
-                    joinAll(job1, job2)
+                    
+                    out.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray())
+                    out.flush()
+                    
+                    handleTls(client, inBuf, targetHost, targetPort)
+                } else {
+                    Log.d(TAG, "Plain HTTP request received, not forwarding.")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Client error: ${e.message}")
-                eventCallback(
-                    MitmEvent.Error(
-                        hostname = targetHost,
-                        message = e.message ?: "Unknown error"
-                    )
-                )
+                Log.w(TAG, "Client error: ${e.message}", e)
+                eventCallback(MitmEvent.Error(hostname = targetHost, message = e.message ?: "Unknown error"))
             } finally {
                 try { client.close() } catch (_: Exception) {}
             }
         }
     }
 
-    private suspend fun relay(src: InputStream, dst: OutputStream, host: String? = null) = withContext(Dispatchers.IO) {
-        val buf = ByteArray(8192)
-        while (true) {
-            val r = try { src.read(buf) } catch (_: Exception) { -1 }
-            if (r <= 0) break
-            try {
-                dst.write(buf,0,r)
-                dst.flush()
-            } catch (_: Exception) { break }
+    private fun handleTls(clientSocket: Socket, clientIn: InputStream, host: String, port: Int) {
+        val serverSslContext = decryptor.buildServerSSLContextForHost(host)
+        if (serverSslContext == null) {
+            Log.w(TAG, "Could not create SSLContext for $host, aborting.");
+            return
+        }
+        
+        val sslSocket = serverSslContext.socketFactory.createSocket(clientSocket, clientSocket.inetAddress.hostAddress, clientSocket.port, true) as SSLSocket
+        sslSocket.useClientMode = false
+        sslSocket.startHandshake()
+
+        val upstreamSocket = createProtectedUpstreamSocket(host, port) ?: return
+        
+        val clientRequestStream = BufferedInputStream(sslSocket.inputStream)
+        val clientResponseStream = BufferedOutputStream(sslSocket.outputStream)
+        val upstreamRequestStream = BufferedOutputStream(upstreamSocket.outputStream)
+        val upstreamResponseStream = BufferedInputStream(upstreamSocket.inputStream)
+
+        scope.launch { relay(clientRequestStream, upstreamRequestStream, "Client->Server") }
+        scope.launch { relay(upstreamResponseStream, clientResponseStream, "Server->Client") }
+    }
+
+    private fun createProtectedUpstreamSocket(host: String, port: Int): SSLSocket? {
+        try {
+            val plainSocket = Socket()
+            vpnService.protect(plainSocket)
+            plainSocket.connect(InetSocketAddress(host, port), 10000)
+            
+            val upstreamFactory = decryptor.createSSLSocketFactory()
+            val sslSocket = upstreamFactory.createSocket(plainSocket, host, port, true) as SSLSocket
+            sslSocket.startHandshake()
+            Log.d(TAG, "Protected upstream connection to $host:$port established.")
+            return sslSocket
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create protected upstream socket to $host:$port", e)
+            return null
         }
     }
 
-    private fun extractHost(headers: Map<String,String>?, fallback: String?): String? =
-        headers?.get("Host") ?: fallback
+    private fun readInitialRequest(inputStream: InputStream): String {
+        val reader = BufferedReader(InputStreamReader(inputStream))
+        return reader.readLine() ?: ""
+    }
 
+    private suspend fun relay(src: InputStream, dst: OutputStream, direction: String) = withContext(Dispatchers.IO) {
+        val buf = ByteArray(8192)
+        try {
+            while (isActive) {
+                val bytesRead = src.read(buf)
+                if (bytesRead == -1) break
+                dst.write(buf, 0, bytesRead)
+                dst.flush()
+            }
+        } catch (e: IOException) {
+            Log.d(TAG, "Relay($direction) finished: ${e.message}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Relay($direction) error", e)
+        }
+    }
+    
     fun stop() {
         running = false
         try { server?.close() } catch (_: Exception) {}
@@ -187,5 +147,3 @@ class MitmProxyManager(
         scope.cancel()
     }
 }
-
-

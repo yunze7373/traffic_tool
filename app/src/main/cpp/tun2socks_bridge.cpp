@@ -36,6 +36,7 @@ typedef void (*fn_core_stop)();
 typedef void (*fn_core_setlog)(int);
 typedef const char* (*fn_core_version)();
 typedef void (*fn_core_register_cb)(void (*)(int,int,const char*,int,const char*,int,const uint8_t*,int));
+typedef void (*fn_core_set_protect)(int (*)(int));
 
 static fn_core_init core_init = nullptr;
 static fn_core_start core_start = nullptr;
@@ -43,6 +44,8 @@ static fn_core_stop core_stop = nullptr;
 static fn_core_setlog core_setlog = nullptr;
 static fn_core_version core_version = nullptr;
 static fn_core_register_cb core_register = nullptr;
+static fn_core_set_protect core_set_protect = nullptr;
+static jmethodID g_protectFd = nullptr; // static int protectFd(int fd)
 static void* core_handle = nullptr;
 static bool core_loaded = false;
 
@@ -100,6 +103,11 @@ static void load_core_if_present() {
     core_setlog = (fn_core_setlog)dlsym(core_handle, "tt_set_log_level");
     core_version = (fn_core_version)dlsym(core_handle, "tt_version");
     core_register = (fn_core_register_cb)dlsym(core_handle, "tt_register_callback");
+    core_set_protect = (fn_core_set_protect)dlsym(core_handle, "tt_set_protect_callback");
+    
+    LOGI("Symbol lookup results: init=%p start=%p stop=%p setlog=%p version=%p register=%p protect=%p", 
+         (void*)core_init, (void*)core_start, (void*)core_stop, (void*)core_setlog, 
+         (void*)core_version, (void*)core_register, (void*)core_set_protect);
 
     if (!(core_init && core_start && core_stop)) {
         LOGE("Core library missing required symbols (tt_init/tt_start/tt_stop). Reverting to stub.");
@@ -108,6 +116,9 @@ static void load_core_if_present() {
         return;
     }
     if (core_register) {
+    if (!core_set_protect) {
+        LOGW("Core library missing optional tt_set_protect_callback symbol; sockets may loop through VPN.");
+    }
         core_register(core_packet_cb);
     } else {
         LOGW("Core library missing optional tt_register_callback symbol; no live packet callbacks.");
@@ -146,6 +157,7 @@ Java_com_trafficcapture_tun2socks_Tun2SocksBridge_nativeInit(JNIEnv* env, jobjec
         g_bridgeClass = (jclass)env->NewGlobalRef(local);
         env->DeleteLocalRef(local);
         g_onPacketCaptured = env->GetStaticMethodID(g_bridgeClass, "onPacketCaptured", "(IILjava/lang/String;ILjava/lang/String;I[B)V");
+    g_protectFd = env->GetStaticMethodID(g_bridgeClass, "protectFd", "(I)I");
     }
     g_tun_fd = tunFd;
     g_mtu = mtu;
@@ -177,6 +189,24 @@ Java_com_trafficcapture_tun2socks_Tun2SocksBridge_nativeStart(JNIEnv* env, jobje
     // fallback stub
     start_stub_generator();
     return JNI_TRUE;
+}
+
+// Adapter for core -> Java protect(fd)
+static int core_protect_adapter(int fd) {
+    if (!g_bridgeClass || !g_protectFd) return 0;
+    JNIEnv* env = nullptr; jniAttachThread(&env);
+    jint r = env->CallStaticIntMethod(g_bridgeClass, g_protectFd, (jint)fd);
+    return r == 1 ? 1 : 0;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_trafficcapture_tun2socks_Tun2SocksBridge_nativeInstallProtectCallback(JNIEnv* env, jobject) {
+    if (core_loaded && core_set_protect) {
+        core_set_protect(core_protect_adapter);
+        LOGI("Installed protect callback into core");
+    } else {
+        LOGW("nativeInstallProtectCallback: core not loaded or setter missing");
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL

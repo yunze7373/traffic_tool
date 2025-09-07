@@ -19,11 +19,23 @@ object Tun2SocksBridge {
         }
     }
 
+    private var vpnServiceRef: android.net.VpnService? = null
+    fun attachVpnService(svc: android.net.VpnService) { vpnServiceRef = svc }
+
+    @JvmStatic
+    fun protectFd(fd: Int): Int {
+        val s = vpnServiceRef ?: return 0
+        return try {
+            if (s.protect(fd)) 1 else 0
+        } catch (_: Throwable) { 0 }
+    }
+
     external fun nativeInit(tunFd: Int, mtu: Int, socksServer: String?, dns: String?): Boolean
     external fun nativeStart(): Boolean
     external fun nativeStop()
     external fun nativeSetLogLevel(level: Int)
     external fun nativeVersion(): String
+    external fun nativeInstallProtectCallback()
 
     // Kotlin 层回调注册
     private var listener: PacketListener? = null
