@@ -133,6 +133,16 @@
                 android:value="vpn" />
         </service>
         
+        <!-- Simple HTTP Proxy Service for traffic capture without VPN complexity -->
+        <service
+            android:name=".SimpleProxyService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="explanation" />
+        </service>
+        
     </application>
 
 </manifest>

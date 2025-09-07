@@ -115,15 +115,27 @@ class FullVpnService : VpnService() {
 
     private fun establishFullVpn(): ParcelFileDescriptor? {
         return try {
-            Builder()
+            val builder = Builder()
                 .setSession("Full Traffic Capture")
                 .addAddress(VPN_ADDRESS, 32)
                 .addRoute("0.0.0.0", 0)
                 // 直接使用真实上游DNS，系统解析不再依赖虚拟 10.0.0.1
                 .addDnsServer(UPSTREAM_DNS)
-                .addDisallowedApplication(packageName)
+                .addDnsServer("1.1.1.1")
+                // 移除应用排除以确保所有流量都被捕获
+                // .addDisallowedApplication(packageName)  // 注释掉自我排除
                 .setMtu(1500)
-                .establish()
+                .setBlocking(false)  // 非阻塞模式
+            
+            // 注意：不排除VPN应用自身，而是通过protect机制避免循环
+            // try {
+            //     builder.addDisallowedApplication(packageName)
+            //     Log.i(TAG, "Excluded VPN app itself from VPN routing")
+            // } catch (e: Exception) {
+            //     Log.w(TAG, "Could not exclude VPN app: ${e.message}")
+            // }
+            
+            builder.establish()
         } catch (e: Exception) {
             Log.e(TAG, "Cannot establish Full VPN", e)
             null

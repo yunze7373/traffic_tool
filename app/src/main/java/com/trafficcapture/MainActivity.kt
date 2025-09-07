@@ -41,6 +41,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnLightVpn: Button
     private lateinit var btnFullVpn: Button
     private lateinit var btnSimpleVpn: Button
+    private lateinit var btnHttpProxy: Button
+    private lateinit var btnRemoteProxy: Button
 
     private lateinit var listAdapter: PacketAdapter
     private lateinit var mitmListView: ListView
@@ -58,11 +60,14 @@ class MainActivity : AppCompatActivity() {
     enum class VpnMode {
         LIGHT,
         FULL,
-        SIMPLE
+        SIMPLE,
+        HTTP_PROXY,
+        REMOTE_PROXY
     }
     
     private var isCapturing = false
     private var httpsDecryptor: HttpsDecryptor? = null
+    private var remoteProxyManager: RemoteProxyManager? = null
 
     companion object {
         private const val TAG = "MainActivity"
@@ -154,6 +159,8 @@ class MainActivity : AppCompatActivity() {
         btnLightVpn = findViewById(R.id.btnLightVpn)
         btnFullVpn = findViewById(R.id.btnFullVpn)
         btnSimpleVpn = findViewById(R.id.btnSimpleVpn)
+        btnHttpProxy = findViewById(R.id.btnHttpProxy)
+        btnRemoteProxy = findViewById(R.id.btnRemoteProxy)
         
         // 设置初始按钮状态
         updateVpnModeButtons()
@@ -237,6 +244,14 @@ class MainActivity : AppCompatActivity() {
         
         btnSimpleVpn.setOnClickListener {
             switchToVpnMode(VpnMode.SIMPLE)
+        }
+        
+        btnHttpProxy.setOnClickListener {
+            switchToVpnMode(VpnMode.HTTP_PROXY)
+        }
+        
+        btnRemoteProxy.setOnClickListener {
+            switchToVpnMode(VpnMode.REMOTE_PROXY)
         }
     }
     
@@ -337,6 +352,20 @@ class MainActivity : AppCompatActivity() {
                 startService(intent)
                 statusText.text = "Status: Simple VPN Running..."
             }
+            VpnMode.HTTP_PROXY -> {
+                // 使用SimpleProxyService进行HTTP代理
+                val intent = Intent(this, SimpleProxyService::class.java)
+                startService(intent)
+                statusText.text = "Status: HTTP Proxy Running..."
+                
+                // 显示代理配置信息
+                showProxyConfigDialog()
+            }
+            VpnMode.REMOTE_PROXY -> {
+                // 使用远程代理服务器
+                initializeRemoteProxy()
+                statusText.text = "Status: Connecting to Remote Proxy..."
+            }
         }
         updateUi(isCapturing = true)
     }
@@ -364,6 +393,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 startService(intent)
             }
+            VpnMode.HTTP_PROXY -> {
+                // 停止SimpleProxyService
+                val intent = Intent(this, SimpleProxyService::class.java)
+                stopService(intent)
+            }
+            VpnMode.REMOTE_PROXY -> {
+                // 停止远程代理连接
+                remoteProxyManager?.stopRemoteCapture()
+            }
         }
         updateUi(isCapturing = false)
     }
@@ -376,6 +414,8 @@ class MainActivity : AppCompatActivity() {
                 VpnMode.LIGHT -> "Light VPN Monitoring..."
                 VpnMode.FULL -> "Full VPN Capturing..."
                 VpnMode.SIMPLE -> "Simple VPN Running..."
+                VpnMode.HTTP_PROXY -> "HTTP Proxy Running..."
+                VpnMode.REMOTE_PROXY -> "Remote Proxy Active..."
             }
             statusText.text = "Status: $modeText"
         } else {
@@ -578,10 +618,129 @@ class MainActivity : AppCompatActivity() {
         btnLightVpn.isEnabled = currentVpnMode != VpnMode.LIGHT
         btnFullVpn.isEnabled = currentVpnMode != VpnMode.FULL
         btnSimpleVpn.isEnabled = currentVpnMode != VpnMode.SIMPLE
+        btnHttpProxy.isEnabled = currentVpnMode != VpnMode.HTTP_PROXY
+        btnRemoteProxy.isEnabled = currentVpnMode != VpnMode.REMOTE_PROXY
         
         // 设置按钮背景色以显示当前模式
         btnLightVpn.alpha = if (currentVpnMode == VpnMode.LIGHT) 0.5f else 1.0f
         btnFullVpn.alpha = if (currentVpnMode == VpnMode.FULL) 0.5f else 1.0f
         btnSimpleVpn.alpha = if (currentVpnMode == VpnMode.SIMPLE) 0.5f else 1.0f
+        btnHttpProxy.alpha = if (currentVpnMode == VpnMode.HTTP_PROXY) 0.5f else 1.0f
+        btnRemoteProxy.alpha = if (currentVpnMode == VpnMode.REMOTE_PROXY) 0.5f else 1.0f
+    }
+    
+    private fun showProxyConfigDialog() {
+        try {
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+            val wifiInfo = wifiManager.connectionInfo
+            val ipAddress = wifiInfo.ipAddress
+            
+            val ip = String.format(
+                "%d.%d.%d.%d",
+                ipAddress and 0xff,
+                ipAddress shr 8 and 0xff,
+                ipAddress shr 16 and 0xff,
+                ipAddress shr 24 and 0xff
+            )
+            
+            val message = """
+                HTTP代理已启动！
+                
+                代理配置信息：
+                主机名: $ip
+                端口: 8888
+                
+                配置步骤：
+                1. 设置 → WiFi → 长按当前WiFi
+                2. 点击"修改网络"
+                3. 展开"高级选项"
+                4. 代理设置选择"手动"
+                5. 主机名输入: $ip
+                6. 端口输入: 8888
+                7. 保存设置
+                
+                然后即可开始抓包分析网络流量！
+            """.trimIndent()
+            
+            AlertDialog.Builder(this)
+                .setTitle("HTTP代理配置")
+                .setMessage(message)
+                .setPositiveButton("复制IP地址") { _, _ ->
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("代理IP", ip)
+                    clipboard.setPrimaryClip(clip)
+                    Toast.makeText(this, "IP地址已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("确定", null)
+                .show()
+                
+        } catch (e: Exception) {
+            Log.e("MainActivity", "显示代理配置对话框失败", e)
+        }
+    }
+    
+    private fun initializeRemoteProxy() {
+        if (remoteProxyManager == null) {
+            remoteProxyManager = RemoteProxyManager(this)
+            
+            // 设置远程代理回调
+            remoteProxyManager?.setCallback(object : RemoteProxyManager.TrafficCallback {
+                override fun onNewTraffic(traffic: RemoteTrafficData) {
+                    runOnUiThread {
+                        // 将远程流量数据转换为本地格式
+                        val packetInfo = convertRemoteTrafficToPacketInfo(traffic)
+                        allPackets.add(0, packetInfo)
+                        applyFilters()
+                        
+                        // 限制最大数据量
+                        if (allPackets.size > 1000) {
+                            allPackets.removeAt(allPackets.size - 1)
+                        }
+                    }
+                }
+                
+                override fun onConnectionStateChanged(connected: Boolean) {
+                    runOnUiThread {
+                        if (connected) {
+                            statusText.text = "Status: Remote Proxy Connected"
+                        } else {
+                            statusText.text = "Status: Remote Proxy Disconnected"
+                        }
+                    }
+                }
+                
+                override fun onError(error: String) {
+                    runOnUiThread {
+                        statusText.text = "Status: Error - $error"
+                        android.widget.Toast.makeText(this@MainActivity, "远程代理错误: $error", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            })
+        }
+        
+        remoteProxyManager?.startRemoteCapture()
+    }
+    
+    private fun convertRemoteTrafficToPacketInfo(traffic: RemoteTrafficData): PacketInfo {
+        // 将远程流量数据转换为本地PacketInfo格式
+        return PacketInfo(
+            timestamp = System.currentTimeMillis(),
+            protocol = if (traffic.url.startsWith("https://")) "HTTPS" else "HTTP",
+            sourceIp = traffic.host,
+            sourcePort = if (traffic.url.startsWith("https://")) 443 else 80,
+            destIp = traffic.host,
+            destPort = if (traffic.url.startsWith("https://")) 443 else 80,
+            size = traffic.requestBody.length + traffic.responseBody.length,
+            appName = "Remote",
+            direction = PacketInfo.Direction.OUTBOUND,
+            payload = "${traffic.method} ${traffic.url}\n\nRequest:\n${traffic.requestBody}\n\nResponse:\n${traffic.responseBody}".toByteArray(),
+            httpInfo = PacketInfo.HttpInfo(
+                method = traffic.method,
+                url = traffic.url,
+                headers = traffic.requestHeaders + traffic.responseHeaders,
+                statusCode = traffic.responseStatus,
+                contentType = traffic.responseHeaders["content-type"]
+            )
+        )
     }
 }

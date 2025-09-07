@@ -65,29 +65,51 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="4dp"
+            android:layout_marginEnd="1dp"
             android:text="轻量监控"
-            android:textSize="11sp" />
+            android:textSize="9sp" />
 
         <Button
             android:id="@+id/btnFullVpn"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="4dp"
-            android:layout_marginEnd="4dp"
+            android:layout_marginStart="1dp"
+            android:layout_marginEnd="1dp"
             android:text="完整抓包"
-            android:textSize="11sp" />
+            android:textSize="9sp" />
             
         <Button
             android:id="@+id/btnSimpleVpn"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="4dp"
+            android:layout_marginStart="1dp"
+            android:layout_marginEnd="1dp"
             android:text="简化代理"
-            android:textSize="11sp"
+            android:textSize="9sp"
             android:backgroundTint="#4CAF50" />
+            
+        <Button
+            android:id="@+id/btnHttpProxy"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="1dp"
+            android:layout_marginEnd="1dp"
+            android:text="HTTP代理"
+            android:textSize="9sp"
+            android:backgroundTint="#FF9800" />
+            
+        <Button
+            android:id="@+id/btnRemoteProxy"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="1dp"
+            android:text="远程代理"
+            android:textSize="9sp"
+            android:backgroundTint="#9C27B0" />
     </LinearLayout>
 
     <LinearLayout
