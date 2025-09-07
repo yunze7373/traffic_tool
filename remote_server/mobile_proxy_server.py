@@ -592,9 +592,8 @@ def main():
             confdir="~/.mitmproxy",
             mode=["regular@8888"],
             ssl_insecure=True,
-            block_global=False,  # 允许所有IP连接
-            allow_hosts=[],      # 清空允许列表（默认允许所有）
-            ignore_hosts=[]      # 清空忽略列表
+            # 不使用block_global选项，默认情况下mitmproxy允许所有连接
+            # allow_hosts和ignore_hosts默认为空，表示允许所有主机
         )
         
         # 使用asyncio.run运行异步函数，这会创建并运行事件循环
