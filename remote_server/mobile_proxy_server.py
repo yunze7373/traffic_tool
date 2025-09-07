@@ -557,7 +557,7 @@ def main():
             listen_port=8888,
             confdir="~/.mitmproxy",
             block_global=False,
-            allow_hosts=".*",
+            allow_hosts=[".*"],
             mode=["regular@8888"],
             ssl_insecure=True,
             stream_large_bodies=1
