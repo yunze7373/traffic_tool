@@ -552,15 +552,12 @@ def main():
         from mitmproxy import options
         from mitmproxy.tools.dump import DumpMaster
         
-        # 配置mitmproxy选项
+        # 配置mitmproxy选项 - 移除不兼容的选项
         opts = options.Options(
             listen_port=8888,
             confdir="~/.mitmproxy",
-            block_global=False,
-            allow_hosts=[".*"],
             mode=["regular@8888"],
-            ssl_insecure=True,
-            stream_large_bodies=1
+            ssl_insecure=True
         )
         
         # 创建DumpMaster并添加addon
