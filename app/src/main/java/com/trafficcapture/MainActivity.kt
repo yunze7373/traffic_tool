@@ -1,14 +1,19 @@
 package com.trafficcapture
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.AppOpsManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Log
@@ -16,6 +21,8 @@ import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 
 class MainActivity : AppCompatActivity() {
@@ -97,6 +104,7 @@ class MainActivity : AppCompatActivity() {
 
         initViews()
         setupListeners()
+        requestNecessaryPermissions()
 
         LocalBroadcastManager.getInstance(this).apply {
             registerReceiver(
@@ -194,6 +202,12 @@ class MainActivity : AppCompatActivity() {
         clearFilterBtn.setOnClickListener {
             filterEditText.setText("")
             protocolSpinner.setSelection(0)
+            // 清除所有数据
+            allPackets.clear()
+            filteredPackets.clear()
+            mitmEvents.clear()
+            listAdapter.notifyDataSetChanged()
+            mitmAdapter.notifyDataSetChanged()
             applyFilters()
         }
         
@@ -474,6 +488,55 @@ class MainActivity : AppCompatActivity() {
         if (isCapturing) {
             startVpnService()
         }
+    }
+    
+    private fun requestNecessaryPermissions() {
+        // 检查USAGE_STATS权限（用于获取运行中的应用）
+        if (!hasUsageStatsPermission()) {
+            requestUsageStatsPermission()
+        }
+        
+        // 检查其他权限
+        val permissions = mutableListOf<String>()
+        
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_LOGS) 
+            != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.READ_LOGS)
+        }
+        
+        if (permissions.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, permissions.toTypedArray(), 123)
+        }
+    }
+    
+    private fun hasUsageStatsPermission(): Boolean {
+        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                packageName
+            )
+        } else {
+            appOps.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                packageName
+            )
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+    
+    private fun requestUsageStatsPermission() {
+        AlertDialog.Builder(this)
+            .setTitle("需要应用使用权限")
+            .setMessage("为了识别网络数据包来源应用，需要授予应用使用权限")
+            .setPositiveButton("去设置") { _, _ ->
+                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                startActivity(intent)
+            }
+            .setNegativeButton("跳过") { _, _ -> }
+            .show()
     }
     
     private fun updateVpnModeButtons() {

@@ -1,7 +1,9 @@
 package com.trafficcapture
 
+import android.content.ContentValues
 import android.content.Context
 import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
 import org.bouncycastle.asn1.x500.X500Name
@@ -315,14 +317,6 @@ class HttpsDecryptor(private val context: Context) {
                 return null
             }
 
-            // 导出到Download目录（对于Android 10+不需要特殊权限）
-            val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadDir.exists()) {
-                downloadDir.mkdirs()
-            }
-
-            val certFile = File(downloadDir, "traffic_tool_ca.crt")
-            
             // 将证书编码为PEM格式
             val certBytes = rootCA!!.encoded
             val pemCert = "-----BEGIN CERTIFICATE-----\n" +
@@ -330,13 +324,44 @@ class HttpsDecryptor(private val context: Context) {
                         .chunked(64).joinToString("\n") +
                     "\n-----END CERTIFICATE-----"
 
-            // 写入文件
-            FileOutputStream(certFile).use { fos ->
-                fos.write(pemCert.toByteArray())
-            }
+            // Android 10+ 使用 MediaStore，之前版本使用外部存储
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                // Android 10+ 使用 MediaStore API
+                val resolver = context.contentResolver
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "traffic_tool_ca.crt")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/x-x509-ca-cert")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                uri?.let { 
+                    resolver.openOutputStream(it)?.use { outputStream ->
+                        outputStream.write(pemCert.toByteArray())
+                    }
+                    Log.d(TAG, "CA certificate exported successfully via MediaStore")
+                    return uri.toString()
+                } ?: run {
+                    Log.e(TAG, "Failed to create MediaStore entry")
+                    return null
+                }
+            } else {
+                // Android 9 及以下使用传统方式
+                val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (!downloadDir.exists()) {
+                    downloadDir.mkdirs()
+                }
 
-            Log.d(TAG, "CA certificate exported successfully to: ${certFile.absolutePath}")
-            certFile.absolutePath
+                val certFile = File(downloadDir, "traffic_tool_ca.crt")
+                
+                // 写入文件
+                FileOutputStream(certFile).use { fos ->
+                    fos.write(pemCert.toByteArray())
+                }
+
+                Log.d(TAG, "CA certificate exported successfully to: ${certFile.absolutePath}")
+                certFile.absolutePath
+            }
             
         } catch (e: Exception) {
             Log.e(TAG, "Failed to export CA certificate", e)

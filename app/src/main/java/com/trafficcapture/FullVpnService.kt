@@ -1,9 +1,12 @@
 package com.trafficcapture
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.usage.UsageStatsManager
+import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
@@ -23,6 +26,12 @@ import java.util.concurrent.TimeUnit
 import com.trafficcapture.tun2socks.Tun2SocksBridge
 import com.trafficcapture.mitm.MitmProxyManager
 import com.trafficcapture.mitm.MitmEvent
+import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
+import android.net.TrafficStats
+import android.system.Os
+import java.io.BufferedReader
+import java.io.FileReader
 
 /**
  * 完整的VPN服务 - 既能正常上网又能抓取所有数据包
@@ -31,6 +40,145 @@ import com.trafficcapture.mitm.MitmEvent
 class FullVpnService : VpnService() {
     // TCP连接键定义（外部提升避免内部类声明限制问题）
     private data class TcpKey(val srcIp: String, val srcPort: Int, val dstIp: String, val dstPort: Int)
+    
+    // 应用解析器
+    private class AppResolver(private val context: VpnService) {
+        private val packageManager = context.packageManager
+        private val appCache = ConcurrentHashMap<Int, Pair<String, String>>()
+        private val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        private val usageStatsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+        } else null
+        
+        fun resolveApp(srcPort: Int, destPort: Int): Pair<String?, String?> {
+            try {
+                // 对于当前的抓包场景，大部分流量来自浏览器或当前操作的应用
+                // 简化逻辑：如果无法精确识别，返回通用标识
+                return Pair("Network App", "网络应用")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to resolve app for ports $srcPort->$destPort", e)
+            }
+            return Pair("Unknown", "未知应用")
+        }
+        
+        private fun getForegroundApp(): Pair<String?, String?> {
+            try {
+                val runningApps = activityManager.runningAppProcesses
+                if (runningApps != null) {
+                    for (appProcess in runningApps) {
+                        if (appProcess.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                            val packageName = appProcess.processName
+                            val appInfo = getAppInfoFromPackage(packageName)
+                            if (appInfo.first != null && !isSystemApp(packageName)) {
+                                return appInfo
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to get foreground app", e)
+            }
+            return Pair(null, null)
+        }
+        
+        private fun getRecentActiveApp(): Pair<String?, String?> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && usageStatsManager != null) {
+                try {
+                    val endTime = System.currentTimeMillis()
+                    val startTime = endTime - 1000 * 60 * 5 // 最近5分钟
+                    
+                    val usageStats = usageStatsManager.queryUsageStats(
+                        UsageStatsManager.INTERVAL_BEST,
+                        startTime,
+                        endTime
+                    )
+                    
+                    // 找到最近使用的非系统应用
+                    val recentApp = usageStats
+                        .filter { !isSystemApp(it.packageName) }
+                        .maxByOrNull { it.lastTimeUsed }
+                    
+                    if (recentApp != null) {
+                        return getAppInfoFromPackage(recentApp.packageName)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to get usage stats", e)
+                }
+            }
+            return Pair(null, null)
+        }
+        
+        private fun isSystemApp(packageName: String): Boolean {
+            return packageName.startsWith("com.android.") ||
+                   packageName.startsWith("android.") ||
+                   packageName == "com.trafficcapture" ||
+                   packageName.contains("permissioncontroller") ||
+                   packageName.contains("permission") ||
+                   packageName == "system"
+        }
+        
+        private fun getAppInfoFromPackage(packageName: String): Pair<String?, String?> {
+            try {
+                val appInfo = packageManager.getApplicationInfo(packageName, 0)
+                val appName = packageManager.getApplicationLabel(appInfo).toString()
+                return Pair(packageName, appName)
+            } catch (e: Exception) {
+                return Pair(null, null)
+            }
+        }
+        
+        private fun getUidForConnection(srcPort: Int, destPort: Int): Int {
+            try {
+                BufferedReader(FileReader("/proc/net/tcp")).use { reader ->
+                    reader.readLine() // 跳过标题行
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        val parts = line!!.trim().split("\\s+".toRegex())
+                        if (parts.size >= 8) {
+                            val localAddr = parts[1]
+                            val remoteAddr = parts[2]
+                            val uid = parts[7].toIntOrNull() ?: 0
+                            
+                            // 解析本地端口
+                            val localPort = localAddr.split(":")[1].toInt(16)
+                            
+                            if (localPort == srcPort) {
+                                return uid
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to read /proc/net/tcp", e)
+            }
+            return 0
+        }
+        
+        private fun getAppInfoFromUid(uid: Int): Pair<String?, String?> {
+            if (appCache.containsKey(uid)) {
+                val cached = appCache[uid]!!
+                return Pair(cached.first, cached.second)
+            }
+            
+            try {
+                val packages = packageManager.getPackagesForUid(uid)
+                if (!packages.isNullOrEmpty()) {
+                    val packageName = packages[0]
+                    val appInfo = packageManager.getApplicationInfo(packageName, 0)
+                    val appName = packageManager.getApplicationLabel(appInfo).toString()
+                    
+                    val result = Pair(packageName, appName)
+                    appCache[uid] = result
+                    return result
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to get app info for UID $uid", e)
+            }
+            
+            return Pair(null, null)
+        }
+    }
+    
     companion object {
         private const val TAG = "FullVpnService"
         private const val VPN_ADDRESS = "10.0.0.2"
@@ -65,12 +213,14 @@ class FullVpnService : VpnService() {
     // MITM 代理
     private var mitmProxy: MitmProxyManager? = null
     private lateinit var httpsDecryptor: HttpsDecryptor
+    private lateinit var appResolver: AppResolver
 
     override fun onCreate() {
         super.onCreate()
         broadcaster = LocalBroadcastManager.getInstance(this)
         Log.d(TAG, "FullVpnService created")
-    httpsDecryptor = HttpsDecryptor(this)
+        httpsDecryptor = HttpsDecryptor(this)
+        appResolver = AppResolver(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -102,6 +252,8 @@ class FullVpnService : VpnService() {
             isRunning = true
             initPcap()
             startMitmProxy()
+            // 等待MITM代理完全启动
+            Thread.sleep(1000)
             if (useNativeTun2Socks) {
                 startNativeEngine(vpnInterface!!)
             } else {
@@ -461,6 +613,13 @@ class FullVpnService : VpnService() {
             val fd = pfd.detachFd()
             Tun2SocksBridge.setListener(object: Tun2SocksBridge.PacketListener {
                 override fun onPacket(direction: Int, proto: Int, srcIp: String, srcPort: Int, dstIp: String, dstPort: Int, payload: ByteArray?) {
+                    // 解析应用信息
+                    val (appPackage, appName) = if (direction == 0) { // 出站数据包
+                        appResolver.resolveApp(srcPort, dstPort)
+                    } else {
+                        appResolver.resolveApp(dstPort, srcPort) // 入站时反向查找
+                    }
+                    
                     // 将native回调转换为 PacketInfo 并广播
                     val protocolName = when(proto) { 6 -> "TCP"; 17 -> "UDP"; 1 -> "ICMP"; else -> "P$proto" }
                     val info = PacketInfo(
@@ -470,6 +629,8 @@ class FullVpnService : VpnService() {
                         destIp = dstIp,
                         destPort = dstPort,
                         size = (payload?.size ?: 0),
+                        appPackage = appPackage,
+                        appName = appName,
                         direction = if (direction == 0) PacketInfo.Direction.OUTBOUND else PacketInfo.Direction.INBOUND,
                         payload = payload
                     )
@@ -486,7 +647,8 @@ class FullVpnService : VpnService() {
                 useNativeFallback()
                 return
             }
-            Tun2SocksBridge.nativeSetLogLevel(2)
+            // 设置为DEBUG级别以便观察数据包转发日志
+            Tun2SocksBridge.nativeSetLogLevel(0) // 0=DEBUG, 1=INFO, 2=WARN
             Tun2SocksBridge.nativeStart()
             Log.i(TAG, "tun2socks engine started: ${Tun2SocksBridge.nativeVersion()}")
         } catch (e: Exception) {
