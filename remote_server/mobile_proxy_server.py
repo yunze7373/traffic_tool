@@ -509,7 +509,7 @@ def start_websocket_server(port=8765, use_ssl=False):
                     print(f"⚠️ SSL证书未找到，使用WS模式 (ws://bigjj.site:8765)")
             
             server = await websockets.serve(
-                websocket_handler, 
+                lambda websocket: websocket_handler(websocket, websocket.path), 
                 "0.0.0.0", 
                 port, 
                 ssl=ssl_context,
@@ -586,12 +586,15 @@ def main():
             print("📝 请确保已安装mitmproxy: pip install mitmproxy")
             return
         
-        # 配置mitmproxy选项 - 移除不兼容的选项
+        # 配置mitmproxy选项 - 允许所有连接
         opts = options.Options(
             listen_port=8888,
             confdir="~/.mitmproxy",
             mode=["regular@8888"],
-            ssl_insecure=True
+            ssl_insecure=True,
+            block_global=False,  # 允许所有IP连接
+            allow_hosts=[],      # 清空允许列表（默认允许所有）
+            ignore_hosts=[]      # 清空忽略列表
         )
         
         # 使用asyncio.run运行异步函数，这会创建并运行事件循环

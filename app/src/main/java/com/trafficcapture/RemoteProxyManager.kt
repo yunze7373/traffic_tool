@@ -148,7 +148,10 @@ class RemoteProxyManager(private val context: Context) {
     private fun connectWebSocket() {
         if (isConnected) return
         
-        Log.d(TAG, "连接到远程服务器: $websocketUrl")
+        Log.d(TAG, "开始连接到远程服务器...")
+        Log.d(TAG, "WebSocket URL: $websocketUrl")
+        Log.d(TAG, "服务器主机: $SERVER_HOST")
+        Log.d(TAG, "WebSocket端口: $WEBSOCKET_PORT")
         
         val request = Request.Builder()
             .url(websocketUrl)
