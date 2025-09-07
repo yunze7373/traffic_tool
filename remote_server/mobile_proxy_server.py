@@ -586,16 +586,27 @@ async def run_mitmproxy_async(addon, opts):
     
     # 创建DumpMaster，现在我们在运行的事件循环中
     master = DumpMaster(opts)
-    # 运行期再次确保关闭 block_global 限制
+    
+    # 运行期再次确保关闭 block_global 限制（多种方法）
     try:
         if hasattr(master, 'options'):
+            # 方法1: 使用 options.set
             try:
                 master.options.set('block_global', False)
                 print("✅ 已在运行期关闭 block_global (master.options.set)")
-            except Exception as e:
-                print(f"⚠️ 运行期关闭 block_global 失败: {e}")
-    except Exception:
-        pass
+            except Exception as e1:
+                print(f"⚠️ master.options.set 失败: {e1}")
+                
+                # 方法2: 直接设置属性
+                try:
+                    if hasattr(master.options, 'block_global'):
+                        master.options.block_global = False
+                        print("✅ 已通过直接赋值关闭 master.options.block_global")
+                except Exception as e2:
+                    print(f"⚠️ 直接设置 master.options.block_global 失败: {e2}")
+    except Exception as e:
+        print(f"⚠️ 访问 master.options 失败: {e}")
+    
     master.addons.add(addon)
     
     print("✅ Addon已注册到mitmproxy")
@@ -673,37 +684,46 @@ def main():
                 mode=["regular"],          # 基础正向代理模式
                 ssl_insecure=True           # 允许自签名证书（便于抓取）
             )
-            # 优先尝试包含 block_global 的配置（如果版本支持）
-            try:
-                test_args = dict(base_args)
-                test_args["block_global"] = False
-                opts = options.Options(**test_args)
-                print("✅ 已在mitmproxy选项中设置 block_global=False")
-                return opts
-            except (KeyError, TypeError) as e:
-                print(f"ℹ️ 'block_global' 选项在当前mitmproxy版本中不可用: {e}")
-                print("ℹ️ 使用默认配置，大多数新版本默认允许全局连接")
-                return options.Options(**base_args)
-            except Exception as e:
-                print(f"⚠️ 创建带扩展参数的mitmproxy配置失败: {e}，尝试最小配置。")
+            
+            # 强制尝试多种方式禁用 block_global
+            for attempt_name, attempt_args in [
+                ("block_global=False", {**base_args, "block_global": False}),
+                ("block-global=False", {**base_args, "block-global": False}), 
+                ("基础配置", base_args)
+            ]:
                 try:
-                    return options.Options(listen_port=8888)
-                except Exception as e2:
-                    print(f"❌ 创建最小mitmproxy配置仍然失败: {e2}")
-                    raise
+                    opts = options.Options(**attempt_args)
+                    print(f"✅ 成功创建mitmproxy选项 ({attempt_name})")
+                    return opts
+                except (KeyError, TypeError) as e:
+                    print(f"ℹ️ 尝试 {attempt_name} 失败: {e}")
+                    continue
+                except Exception as e:
+                    print(f"⚠️ 尝试 {attempt_name} 异常: {e}")
+                    continue
+            
+            # 最后的fallback
+            try:
+                return options.Options(listen_port=8888)
+            except Exception as e:
+                print(f"❌ 创建最小mitmproxy配置失败: {e}")
+                raise
 
         opts = create_mitmproxy_options()
         
         # 运行期再次尝试禁用 block_global （多重保险）
         try:
-            # 方法1: 通过update方法
-            if hasattr(opts, 'update') and callable(opts.update):
-                opts.update(block_global=False)
-                print("✅ 已通过 opts.update 关闭 block_global")
-            # 方法2: 直接设置属性  
-            elif hasattr(opts, 'block_global'):
-                setattr(opts, 'block_global', False)
-                print("✅ 已通过 setattr 关闭 block_global")
+            # 方法1: 直接设置属性  
+            if hasattr(opts, 'block_global'):
+                opts.block_global = False
+                print("✅ 已通过直接赋值关闭 block_global")
+            # 方法2: 通过 set 方法
+            elif hasattr(opts, 'set') and callable(opts.set):
+                try:
+                    opts.set('block_global', False)
+                    print("✅ 已通过 opts.set 关闭 block_global")
+                except Exception:
+                    pass
             else:
                 print("ℹ️ 当前mitmproxy版本无 block_global 选项，跳过设置")
         except Exception as e:
