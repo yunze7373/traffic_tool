@@ -538,8 +538,10 @@ async def run_mitmproxy_async(addon, opts):
     print(f"✅ WebSocket服务器成功绑定到 0.0.0.0:8765")
     print(f"� HTTP API服务器启动在端口 5010")
     
-    # 运行mitmproxy
-    await master.run_async()
+    # 运行mitmproxy（使用正确的方法）
+    # DumpMaster.run() 是同步方法，在异步上下文中使用 run_in_executor
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, master.run)
 
 def main():
     print("�🚀 bigjj.site 移动抓包远程代理服务器")
