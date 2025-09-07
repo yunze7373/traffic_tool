@@ -10,6 +10,7 @@ import os
 import sqlite3
 import ssl
 import traceback
+import inspect
 import websockets
 import threading
 from datetime import datetime
@@ -540,7 +541,8 @@ async def run_mitmproxy_async(addon, opts):
     await master.run()
 
 def main():
-    print("�🚀 bigjj.site 移动抓包远程代理服务器")
+    # 启动横幅
+    print("🚀 bigjj.site 移动抓包远程代理服务器")
     print("=" * 60)
     
     # 创建addon实例
@@ -586,15 +588,32 @@ def main():
             print("📝 请确保已安装mitmproxy: pip install mitmproxy")
             return
         
-        # 配置mitmproxy选项 - 允许所有连接
-        opts = options.Options(
-            listen_port=8888,
-            confdir="~/.mitmproxy",
-            mode=["regular@8888"],
-            ssl_insecure=True,
-            # 不使用block_global选项，默认情况下mitmproxy允许所有连接
-            # allow_hosts和ignore_hosts默认为空，表示允许所有主机
-        )
+        # 动态创建mitmproxy选项，兼容不同版本，优先尝试使用可能存在的 block_global，再自动降级
+        def create_mitmproxy_options():
+            base_args = dict(
+                listen_host="0.0.0.0",      # 监听全部地址
+                listen_port=8888,
+                confdir="~/.mitmproxy",
+                mode=["regular"],          # 基础正向代理模式
+                ssl_insecure=True           # 允许自签名证书（便于抓取）
+            )
+            # 优先尝试包含 block_global 的配置（如果版本支持）
+            try:
+                test_args = dict(base_args)
+                test_args["block_global"] = False
+                return options.Options(**test_args)
+            except KeyError:
+                print("ℹ️ 'block_global' 选项在当前mitmproxy版本中不可用，将使用默认全局监听设置。")
+                return options.Options(**base_args)
+            except Exception as e:
+                print(f"⚠️ 创建带扩展参数的mitmproxy配置失败: {e}，尝试最小配置。")
+                try:
+                    return options.Options(listen_port=8888)
+                except Exception as e2:
+                    print(f"❌ 创建最小mitmproxy配置仍然失败: {e2}")
+                    raise
+
+        opts = create_mitmproxy_options()
         
         # 使用asyncio.run运行异步函数，这会创建并运行事件循环
         asyncio.run(run_mitmproxy_async(addon, opts))
