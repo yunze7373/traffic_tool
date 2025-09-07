@@ -12,10 +12,17 @@ import ssl
 import websockets
 import threading
 from datetime import datetime
-from mitmproxy import http
-from mitmproxy.tools.main import mitmdump
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.parse
+
+# 尝试导入mitmproxy模块
+try:
+    from mitmproxy import http
+    from mitmproxy.tools.main import mitmdump
+    MITMPROXY_AVAILABLE = True
+except ImportError:
+    MITMPROXY_AVAILABLE = False
+    print("⚠️ mitmproxy模块未安装，部分功能可能受限")
 
 class TrafficDatabase:
     def __init__(self, db_path='mobile_traffic.db'):
@@ -108,11 +115,11 @@ class MobileProxyAddon:
         self.websocket_clients.discard(websocket)
         print(f"📱 设备断开: {len(self.websocket_clients)} 个活跃连接")
     
-    def request(self, flow: http.HTTPFlow):
+    def request(self, flow):
         # 记录请求开始时间
         flow.metadata['start_time'] = datetime.now()
     
-    def response(self, flow: http.HTTPFlow):
+    def response(self, flow):
         try:
             # 提取设备信息
             device_id = self.get_device_id(flow)
