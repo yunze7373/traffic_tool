@@ -17,6 +17,10 @@ from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.parse
 
+# WebSocket/API 是否启用 SSL（用于页面与状态展示）
+WS_USE_SSL = False
+API_USE_SSL = False
+
 # 尝试导入mitmproxy模块
 try:
     from mitmproxy import http
@@ -26,8 +30,6 @@ except ImportError:
     MITMPROXY_AVAILABLE = False
     print("⚠️ mitmproxy模块未安装，部分功能可能受限")
 
-    # WebSocket是否启用SSL（供页面展示）
-    WS_USE_SSL = False
 
 class TrafficDatabase:
     def __init__(self, db_path='mobile_traffic.db'):
@@ -250,6 +252,8 @@ class APIHandler(BaseHTTPRequestHandler):
                     'domain': 'bigjj.site',
                     'ws_scheme': 'wss' if WS_USE_SSL else 'ws',
                     'ws_url': f"{'wss' if WS_USE_SSL else 'ws'}://bigjj.site:8765",
+                    'api_scheme': 'https' if API_USE_SSL else 'http',
+                    'api_url': f"{'https' if API_USE_SSL else 'http'}://bigjj.site:5010",
                     'active_connections': len(addon.websocket_clients),
                     'total_traffic': addon.traffic_count,
                     'timestamp': datetime.now().isoformat()
@@ -318,8 +322,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 websocket_count = len(addon.websocket_clients)
                 traffic_count = addon.traffic_count
                 
-                # 根据当前WebSocket模式显示正确的schema
+                # 根据当前WebSocket/API模式显示正确的schema
                 ws_schema = 'wss' if WS_USE_SSL else 'ws'
+                api_schema = 'https' if API_USE_SSL else 'http'
                 html = f"""
                 <!DOCTYPE html>
                 <html>
@@ -361,7 +366,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     <ul>
                         <li>代理地址: bigjj.site:8888</li>
                         <li>WebSocket: {ws_schema}://bigjj.site:8765</li>
-                        <li>API接口: http://bigjj.site:5010</li>
+                        <li>API接口: {api_schema}://bigjj.site:5010</li>
                         <li>Web管理: http://bigjj.site:8010</li>
                     </ul>
                     
@@ -434,7 +439,7 @@ def start_api_server(port=5010, use_ssl=False):
     """启动HTTP API服务器"""
     try:
         server = HTTPServer(('0.0.0.0', port), APIHandler)
-        
+
         if use_ssl:
             # 查找SSL证书文件
             cert_paths = [
@@ -466,6 +471,8 @@ def start_api_server(port=5010, use_ssl=False):
                 context.load_cert_chain(cert_file, key_file)
                 server.socket = context.wrap_socket(server.socket, server_side=True)
                 print(f"🔒 HTTPS API服务器启动在端口 {port} (SSL: {cert_file})")
+                global API_USE_SSL
+                API_USE_SSL = True
             else:
                 print(f"⚠️ SSL证书未找到，使用HTTP模式在端口 {port}")
         else:
@@ -521,6 +528,10 @@ def start_websocket_server(port=8765, use_ssl=False):
                 else:
                     print(f"⚠️ SSL证书未找到，使用WS模式 (ws://bigjj.site:8765)")
 
+            # 在实际是否启用SSL的结果基础上更新展示用开关
+            global WS_USE_SSL
+            WS_USE_SSL = bool(ssl_context is not None)
+
             server = await websockets.serve(
                 websocket_handler,
                 "0.0.0.0",
@@ -533,9 +544,7 @@ def start_websocket_server(port=8765, use_ssl=False):
             print(f"✅ WebSocket服务器成功绑定到 0.0.0.0:{port}")
             await server.wait_closed()
 
-        # 在独立的事件循环中运行，并记录全局WS模式供页面展示
-        global WS_USE_SSL
-        WS_USE_SSL = bool(use_ssl)
+        # 在独立的事件循环中运行
         loop.run_until_complete(run_server())
     except Exception as e:
         print(f"❌ WebSocket服务器启动失败: {e}")
@@ -601,8 +610,13 @@ def main():
     addon = get_addon_instance()
     print("✅ TrafficCaptureAddon 实例已创建")
     
-    # 启动HTTP API服务器 (线程)
-    api_thread = threading.Thread(target=start_api_server, args=(5010,))
+    # 启动HTTP API服务器 (线程) - 优先尝试启用HTTPS（若证书存在）
+    api_use_ssl = any([
+        os.path.exists('/etc/letsencrypt/live/bigjj.site/fullchain.pem') and os.path.exists('/etc/letsencrypt/live/bigjj.site/privkey.pem'),
+        os.path.exists('/etc/ssl/certs/bigjj.site.crt') and os.path.exists('/etc/ssl/private/bigjj.site.key'),
+        os.path.exists('/opt/mobile-proxy/cert.pem') and os.path.exists('/opt/mobile-proxy/key.pem')
+    ])
+    api_thread = threading.Thread(target=start_api_server, args=(5010, api_use_ssl))
     api_thread.daemon = True
     api_thread.start()
     
@@ -618,8 +632,8 @@ def main():
     print("🌍 域名: bigjj.site")
     print("📡 代理服务器: bigjj.site:8888")
     print(f"📱 WebSocket: {'wss' if ws_use_ssl else 'ws'}://bigjj.site:8765")
-    print("🔗 API接口: http://bigjj.site:5010")
-    print("🌐 状态页面: http://bigjj.site:5010")
+    print(f"🔗 API接口: {'https' if api_use_ssl else 'http'}://bigjj.site:5010")
+    print(f"🌐 状态页面: {'https' if api_use_ssl else 'http'}://bigjj.site:5010")
     print("=" * 60)
     print("✅ 所有服务启动完成！")
     print("📱 请在Android应用中选择'远程代理'模式并配置WiFi代理。")

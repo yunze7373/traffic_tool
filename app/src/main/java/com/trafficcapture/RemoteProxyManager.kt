@@ -12,6 +12,7 @@ import kotlinx.coroutines.*
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import java.util.concurrent.TimeUnit
+import org.json.JSONObject
 
 data class RemoteTrafficData(
     @SerializedName("timestamp") val timestamp: String,
@@ -36,7 +37,7 @@ class RemoteProxyManager(private val context: Context) {
         private const val API_PORT = 5010
     }
     
-    private val websocketUrl = "ws://$SERVER_HOST:$WEBSOCKET_PORT"
+    private val defaultWebsocketUrl = "ws://$SERVER_HOST:$WEBSOCKET_PORT"
     private val apiUrl = "http://$SERVER_HOST:$API_PORT/api"
     
     private var webSocket: WebSocket? = null
@@ -71,11 +72,14 @@ class RemoteProxyManager(private val context: Context) {
                 val request = Request.Builder()
                     .url(url)
                     .build()
-                
+
                 val response = httpClient.newCall(request).execute()
                 if (response.isSuccessful) {
-                    Log.d(TAG, "服务器状态检查成功，开始连接WebSocket")
-                    connectWebSocket()
+                    val body = response.body?.string() ?: "{}"
+                    val json = JSONObject(body)
+                    val wsUrl = json.optString("ws_url", defaultWebsocketUrl)
+                    Log.d(TAG, "服务器状态检查成功，开始连接WebSocket: $wsUrl")
+                    connectWebSocket(wsUrl)
                     
                     // 延迟显示配置对话框，让用户先看到连接状态
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -145,23 +149,42 @@ class RemoteProxyManager(private val context: Context) {
         clipboard.setPrimaryClip(clip)
     }
     
-    private fun connectWebSocket() {
+    private fun connectWebSocket(initialUrl: String = defaultWebsocketUrl) {
         if (isConnected) return
         
         Log.d(TAG, "开始连接到远程服务器...")
-        Log.d(TAG, "WebSocket URL: $websocketUrl")
+        Log.d(TAG, "WebSocket URL (初始): $initialUrl")
         Log.d(TAG, "服务器主机: $SERVER_HOST")
         Log.d(TAG, "WebSocket端口: $WEBSOCKET_PORT")
         
-        val request = Request.Builder()
-            .url(websocketUrl)
+        fun buildRequest(url: String) = Request.Builder()
+            .url(url)
             .addHeader("User-Agent", "TrafficCapture-Android/1.0")
             .addHeader("Origin", "http://bigjj.site")
             .addHeader("Connection", "Upgrade")
             .addHeader("Upgrade", "websocket")
             .build()
-        
-        webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
+
+        var attemptedWs = false
+        var attemptedWss = false
+
+        fun nextUrl(prev: String?): String? {
+            if (prev == null) return initialUrl
+            return when {
+                prev.startsWith("wss://", true) && !attemptedWs -> {
+                    attemptedWs = true; prev.replaceFirst("wss://", "ws://")
+                }
+                prev.startsWith("ws://", true) && !attemptedWss -> {
+                    attemptedWss = true; prev.replaceFirst("ws://", "wss://")
+                }
+                else -> null
+            }
+        }
+
+        fun doConnect(url: String) {
+            Log.d(TAG, "尝试连接: $url")
+            val req = buildRequest(url)
+            webSocket = httpClient.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "WebSocket连接成功")
                 isConnected = true
@@ -212,13 +235,22 @@ class RemoteProxyManager(private val context: Context) {
                     else -> "连接失败: ${t.message}"
                 }
                 callback?.onError(errorMsg)
-                
-                // 延长重连间隔，避免频繁重试
-                GlobalScope.launch {
-                    delay(10000) // 10秒后重试
-                    if (!isConnected) {
-                        Log.d(TAG, "尝试重新连接...")
-                        connectWebSocket()
+
+                // 尝试切换 ws/wss
+                val next = nextUrl(url)
+                if (next != null) {
+                    Log.d(TAG, "尝试切换协议重连: $next")
+                    doConnect(next)
+                } else {
+                    // 延长重连间隔，避免频繁重试
+                    GlobalScope.launch {
+                        delay(10000)
+                        if (!isConnected) {
+                            Log.d(TAG, "尝试重新连接(初始URL)...")
+                            attemptedWs = false
+                            attemptedWss = false
+                            doConnect(initialUrl)
+                        }
                     }
                 }
             }
@@ -228,7 +260,11 @@ class RemoteProxyManager(private val context: Context) {
                 isConnected = false
                 callback?.onConnectionStateChanged(false)
             }
-        })
+            })
+        }
+
+        // 首次连接
+        doConnect(initialUrl)
     }
     
     private fun disconnectWebSocket() {
