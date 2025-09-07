@@ -145,6 +145,7 @@ if [ \$? -eq 0 ]; then
         mv mobile_proxy_server.py.new mobile_proxy_server.py
         echo "✅ 更新成功，重启服务..."
         sudo systemctl restart mobile-proxy
+        sudo systemctl restart mitmweb
         echo "🎉 服务已重启"
     else
         echo "❌ 新版本语法错误，保持原版本"
@@ -155,6 +156,16 @@ else
 fi
 EOF
 chmod +x /opt/mobile-proxy/update.sh
+
+# 7. 创建mitmproxy Web界面启动脚本
+echo "🌐 创建mitmproxy Web界面脚本..."
+cat > /opt/mobile-proxy/start-mitmweb.sh << 'EOF'
+#!/bin/bash
+cd /opt/mobile-proxy
+export PATH="$HOME/.local/bin:$PATH"
+mitmweb --web-host 0.0.0.0 --web-port 8010 --set confdir=~/.mitmproxy
+EOF
+chmod +x /opt/mobile-proxy/start-mitmweb.sh
 
 # 7. 创建systemd服务
 echo "🔧 创建系统服务..."
@@ -180,11 +191,37 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+# 8. 创建mitmproxy Web界面服务
+echo "🌐 创建mitmproxy Web界面服务..."
+sudo tee /etc/systemd/system/mitmweb.service > /dev/null <<EOF
+[Unit]
+Description=mitmproxy Web Interface for bigjj.site
+After=network.target mobile-proxy.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=$USER
+Group=$USER
+WorkingDirectory=/opt/mobile-proxy
+Environment=PATH=/home/$USER/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/mobile-proxy/start-mitmweb.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # 8. 启动服务
 echo "🔄 启动代理服务..."
 sudo systemctl daemon-reload
 sudo systemctl enable mobile-proxy
+sudo systemctl enable mitmweb
 sudo systemctl start mobile-proxy
+sudo systemctl start mitmweb
 
 # 等待服务启动
 echo "⏳ 等待服务启动..."

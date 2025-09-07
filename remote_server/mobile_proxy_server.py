@@ -359,13 +359,11 @@ def main():
     print("=" * 60)
     
     try:
-        # 启动mitmproxy (主线程)
+        # 启动mitmproxy (主线程) - 只启动代理，不启动Web界面
         print("🔄 启动mitmproxy代理服务器...")
         mitmdump([
             "-s", __file__, 
             "--listen-port", "8888",
-            "--set", "web_host=0.0.0.0",
-            "--set", "web_port=8010",
             "--set", "confdir=~/.mitmproxy"
         ])
     except KeyboardInterrupt:
