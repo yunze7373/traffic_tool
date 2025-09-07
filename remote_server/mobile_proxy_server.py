@@ -225,6 +225,54 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(status, ensure_ascii=False).encode('utf-8'))
                 print("📊 状态查询请求")
             
+            elif parsed_path.path == '/cert.pem':
+                # 提供mitmproxy证书下载
+                try:
+                    import os
+                    cert_path = os.path.expanduser('~/.mitmproxy/mitmproxy-ca-cert.pem')
+                    if os.path.exists(cert_path):
+                        with open(cert_path, 'rb') as f:
+                            cert_data = f.read()
+                        
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/x-pem-file')
+                        self.send_header('Content-Disposition', 'attachment; filename="mitmproxy-ca-cert.pem"')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        self.wfile.write(cert_data)
+                        print("📜 证书下载请求")
+                    else:
+                        # 如果证书不存在，提供帮助信息
+                        help_html = """
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <title>证书下载</title>
+                            <meta charset="utf-8">
+                        </head>
+                        <body>
+                            <h1>📜 mitmproxy 证书</h1>
+                            <p>❌ 证书文件未找到</p>
+                            <p>请确保mitmproxy已启动并生成了证书</p>
+                            <h2>替代方案：</h2>
+                            <ol>
+                                <li>配置代理后访问: <a href="http://mitm.it">http://mitm.it</a></li>
+                                <li>选择Android选项下载证书</li>
+                                <li>在设置中安装证书</li>
+                            </ol>
+                        </body>
+                        </html>
+                        """
+                        self.send_response(404)
+                        self.send_header('Content-Type', 'text/html; charset=utf-8')
+                        self.end_headers()
+                        self.wfile.write(help_html.encode('utf-8'))
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-Type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(f'证书下载失败: {e}'.encode('utf-8'))
+            
             elif parsed_path.path == '/':
                 # 简单的状态页面
                 html = f"""
@@ -233,6 +281,12 @@ class APIHandler(BaseHTTPRequestHandler):
                 <head>
                     <title>bigjj.site 移动抓包代理服务器</title>
                     <meta charset="utf-8">
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                        .cert-download {{ background: #f0f8ff; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+                        .cert-download a {{ color: #1e90ff; text-decoration: none; }}
+                        .cert-download a:hover {{ text-decoration: underline; }}
+                    </style>
                 </head>
                 <body>
                     <h1>🚀 bigjj.site 移动抓包代理服务器</h1>
@@ -241,11 +295,21 @@ class APIHandler(BaseHTTPRequestHandler):
                     <p>🌐 总流量: {proxy_addon.traffic_count}</p>
                     <p>⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                     
+                    <div class="cert-download">
+                        <h2>🔒 HTTPS证书下载</h2>
+                        <p>要解密HTTPS流量，请下载并安装证书：</p>
+                        <ul>
+                            <li><a href="/cert.pem">📜 下载mitmproxy证书</a></li>
+                            <li><a href="http://mitm.it" target="_blank">🌐 访问 mitm.it 获取证书</a> (需先配置代理)</li>
+                        </ul>
+                    </div>
+                    
                     <h2>配置信息</h2>
                     <ul>
                         <li>代理地址: bigjj.site:8888</li>
-                        <li>WebSocket: wss://bigjj.site:8765</li>
-                        <li>API接口: https://bigjj.site:5010</li>
+                        <li>WebSocket: ws://bigjj.site:8765</li>
+                        <li>API接口: http://bigjj.site:5010</li>
+                        <li>Web管理: http://bigjj.site:8010</li>
                     </ul>
                     
                     <h2>Android配置步骤</h2>
