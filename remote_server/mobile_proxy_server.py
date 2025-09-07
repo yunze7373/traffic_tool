@@ -464,7 +464,7 @@ def start_websocket_server(port=8765, use_ssl=False):
     try:
         print(f"📱 WebSocket服务器启动在端口 {port}")
         
-        # 创建新的事件循环
+        # 创建新的事件循环（在独立线程中）
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
@@ -491,7 +491,7 @@ def start_websocket_server(port=8765, use_ssl=False):
                     if os.path.exists(cert_path):
                         cert_file = cert_path
                         break
-                        
+                
                 for key_path in key_paths:
                     if os.path.exists(key_path):
                         key_file = key_path
@@ -505,10 +505,20 @@ def start_websocket_server(port=8765, use_ssl=False):
                 else:
                     print(f"⚠️ SSL证书未找到，使用WS模式")
             
-            server = await websockets.serve(websocket_handler, "0.0.0.0", port, ssl=ssl_context)
+            import websockets
+            server = await websockets.serve(
+                websocket_handler, 
+                "0.0.0.0", 
+                port, 
+                ssl=ssl_context,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=10
+            )
             print(f"✅ WebSocket服务器成功绑定到 0.0.0.0:{port}")
             await server.wait_closed()
         
+        # 在独立的事件循环中运行
         loop.run_until_complete(run_server())
     except Exception as e:
         print(f"❌ WebSocket服务器启动失败: {e}")
@@ -549,8 +559,19 @@ def main():
         print("🔄 启动mitmproxy代理服务器...")
         print(f"📄 加载Addon: {addon.__class__.__name__}")
         
-        from mitmproxy import options
-        from mitmproxy.tools.dump import DumpMaster
+        # 检查mitmproxy是否可用
+        if not MITMPROXY_AVAILABLE:
+            print("❌ mitmproxy未安装，无法启动代理服务器")
+            print("📝 请在生产环境中安装: pip install mitmproxy")
+            return
+        
+        try:
+            from mitmproxy import options
+            from mitmproxy.tools.dump import DumpMaster
+        except ImportError as e:
+            print(f"❌ 导入mitmproxy模块失败: {e}")
+            print("📝 请确保已安装mitmproxy: pip install mitmproxy")
+            return
         
         # 配置mitmproxy选项 - 移除不兼容的选项
         opts = options.Options(
@@ -560,11 +581,23 @@ def main():
             ssl_insecure=True
         )
         
-        # 创建DumpMaster并添加addon
-        master = DumpMaster(opts)
+        # 确保在主线程中有事件循环
+        import asyncio
+        try:
+            # 尝试获取当前事件循环
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # 如果没有事件循环，创建一个新的
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # 创建DumpMaster并传入事件循环
+        master = DumpMaster(opts, event_loop=loop)
         master.addons.add(addon)
         
         print("✅ Addon已注册到mitmproxy")
+        print(f"✅ WebSocket服务器成功绑定到 0.0.0.0:8765")
+        print(f"🔗 HTTP API服务器启动在端口 5010")
         master.run()
         
     except KeyboardInterrupt:
