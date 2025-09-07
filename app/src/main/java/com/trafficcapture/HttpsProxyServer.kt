@@ -15,7 +15,7 @@ class HttpsProxyServer : Thread() {
     
     companion object {
         private const val TAG = "HttpsProxyServer"
-        private const val PROXY_PORT = 8888
+        private const val PROXY_PORT = 8080
         private const val BUFFER_SIZE = 4096
     }
     

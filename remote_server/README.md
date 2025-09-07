@@ -42,7 +42,7 @@ chmod +x deploy_server.sh
 1. 在Android应用中选择**"远程代理"**模式
 2. 配置WiFi代理：
    - 主机名: `bigjj.site`
-   - 端口: `8888`
+   - 端口: `8080`
 3. 开始抓包！
 
 ## 🔧 服务管理
@@ -95,7 +95,7 @@ cd /opt/mobile-proxy
 
 | 服务 | 端口 | 用途 |
 |------|------|------|
-| 代理服务器 | 8888 | HTTP/HTTPS代理，Android设备连接此端口 |
+| 代理服务器 | 8080 | HTTP/HTTPS代理，Android设备连接此端口 |
 | WebSocket | 8765 | 实时数据推送到Android应用 |
 | API接口 | 5010 | RESTful API，获取历史数据和状态 |
 | Web管理 | 8010 | mitmproxy web界面，浏览器管理 |
@@ -105,7 +105,7 @@ cd /opt/mobile-proxy
 ### 下载并安装证书
 在Android设备浏览器中访问：
 ```
-http://bigjj.site:8888/cert.pem
+http://bigjj.site:8080/cert.pem
 ```
 下载证书并安装为"VPN和应用"证书。
 
@@ -147,7 +147,7 @@ sqlite3 mobile_traffic.db "DELETE FROM traffic_logs WHERE created_at < datetime(
    pip3 list | grep mitmproxy
    
    # 检查端口占用
-   netstat -tlnp | grep -E '(8888|5010|8765|8010)'
+   netstat -tlnp | grep -E '(8080|5010|8765|8010)'
    
    # 手动启动测试
    cd /opt/mobile-proxy
@@ -160,7 +160,7 @@ sqlite3 mobile_traffic.db "DELETE FROM traffic_logs WHERE created_at < datetime(
    sudo ufw status
    
    # 测试端口连通性
-   telnet bigjj.site 8888
+   telnet bigjj.site 8080
    ```
 
 3. **证书问题**

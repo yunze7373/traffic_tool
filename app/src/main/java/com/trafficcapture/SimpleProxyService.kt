@@ -21,7 +21,7 @@ class SimpleProxyService : Service() {
     
     companion object {
         private const val TAG = "SimpleProxyService"
-        const val PROXY_PORT = 8888
+        const val PROXY_PORT = 8080
     }
     
     inner class LocalBinder : Binder() {

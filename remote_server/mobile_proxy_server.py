@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-移动抓包远程代理服务器
+移动抓包远程代琁E��务器
 为 bigjj.site 域名定制版本
 """
 
@@ -17,11 +17,11 @@ from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.parse
 
-# WebSocket/API 是否启用 SSL（用于页面与状态展示）
+# WebSocket/API 是否启用 SSL�E�用于页面与状态展示�E�E
 WS_USE_SSL = False
 API_USE_SSL = False
 
-# 注意：不再使用自定义 mitmproxy，而是依赖现有的 mitmweb.service
+# 注意：不�E使用自定乁Emitmproxy�E�而是依赖现有的 mitmweb.service
 
 
 class TrafficDatabase:
@@ -49,7 +49,7 @@ class TrafficDatabase:
         ''')
         conn.commit()
         conn.close()
-        print("✅ 数据库初始化完成")
+        print("✁E数据库�E始化完�E")
     
     def save_traffic(self, data):
         try:
@@ -68,7 +68,7 @@ class TrafficDatabase:
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"❌ 保存流量数据失败: {e}")
+            print(f"❁E保存流E��数据失败: {e}")
     
     def get_traffic(self, device_id, limit=100):
         try:
@@ -98,7 +98,7 @@ class TrafficDatabase:
             conn.close()
             return results
         except Exception as e:
-            print(f"❌ 获取流量数据失败: {e}")
+            print(f"❁E获取流E��数据失败: {e}")
             return []
 
 class MobileProxyAddon:
@@ -109,11 +109,11 @@ class MobileProxyAddon:
     
     def add_websocket_client(self, websocket):
         self.websocket_clients.add(websocket)
-        print(f"📱 设备连接: {len(self.websocket_clients)} 个活跃连接")
+        print(f"📱 设夁E��接: {len(self.websocket_clients)} 个活跁E��接")
     
     def remove_websocket_client(self, websocket):
         self.websocket_clients.discard(websocket)
-        print(f"📱 设备断开: {len(self.websocket_clients)} 个活跃连接")
+        print(f"📱 设夁E��开: {len(self.websocket_clients)} 个活跁E��接")
     
     def request(self, flow):
         # 记录请求开始时间
@@ -121,10 +121,10 @@ class MobileProxyAddon:
     
     def response(self, flow):
         try:
-            # 提取设备信息
+            # 提取设夁E��息
             device_id = self.get_device_id(flow)
             
-            # 构造流量数据
+            # 极E��流E��数据
             traffic_data = {
                 'timestamp': datetime.now().isoformat(),
                 'method': flow.request.method,
@@ -140,14 +140,14 @@ class MobileProxyAddon:
             
             self.traffic_count += 1
             print(f"🌐 [{self.traffic_count}] [{device_id}] {flow.request.method} {flow.request.pretty_url} -> {flow.response.status_code}")
-            print(f"[DEBUG] 当前WebSocket客户端数: {len(self.websocket_clients)}, 流量计数: {self.traffic_count}")
+            print(f"[DEBUG] 当前WebSocket客户端数: {len(self.websocket_clients)}, 流E��计数: {self.traffic_count}")
             
-            # 保存到数据库
+            # 保存到数据庁E
             self.db.save_traffic(traffic_data)
             
             # 推送到WebSocket客户端
             if self.websocket_clients:
-                # 使用线程安全的方式发送数据
+                # 使用线程安�E皁E��式发送数据
                 def send_async():
                     try:
                         loop = asyncio.new_event_loop()
@@ -162,7 +162,7 @@ class MobileProxyAddon:
                 thread.start()
             
         except Exception as e:
-            print(f"❌ 处理流量数据失败: {e}")
+            print(f"❁E夁E��流E��数据失败: {e}")
     
     def safe_get_text(self, message):
         try:
@@ -175,8 +175,8 @@ class MobileProxyAddon:
             return f'<Binary data: {len(message.raw_content)} bytes>'
     
     def get_device_id(self, flow):
-        # 从请求头或IP识别设备
-        # 使用peername替代address以避免弃用警告
+        # 从请求头或IP证E��设夁E
+        # 使用peername替代address以避免弁E��警呁E
         client_addr = getattr(flow.client_conn, 'peername', flow.client_conn.address)
         client_ip = client_addr[0] if client_addr else "unknown"
         user_agent = flow.request.headers.get('User-Agent', '')
@@ -202,19 +202,19 @@ class MobileProxyAddon:
                 print(f"📱 WebSocket发送失败: {e}")
                 disconnected.add(client)
         
-        # 清理断开的连接
+        # 渁E��断开皁E��接
         for client in disconnected:
             self.websocket_clients.discard(client)
 
-# 全局addon实例 (统一使用这一个)
+# 全局addon实侁E(统一使用这一个)
 addon_instance = None
 
 def get_addon_instance():
-    """获取或创建addon实例"""
+    """获取�E创建addon实侁E""
     global addon_instance
     if addon_instance is None:
         addon_instance = MobileProxyAddon()
-        print("✅ 创建MobileProxyAddon实例")
+        print("✁E创建MobileProxyAddon实侁E)
     return addon_instance
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -223,7 +223,7 @@ class APIHandler(BaseHTTPRequestHandler):
             parsed_path = urllib.parse.urlparse(self.path)
             
             if parsed_path.path == '/api/traffic':
-                # 获取流量数据
+                # 获取流E��数据
                 query_params = urllib.parse.parse_qs(parsed_path.query)
                 device_id = query_params.get('device_id', [''])[0]
                 limit = int(query_params.get('limit', ['100'])[0])
@@ -237,10 +237,10 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 
                 self.wfile.write(json.dumps(results, ensure_ascii=False).encode('utf-8'))
-                print(f"📊 API请求: 返回 {len(results)} 条记录给设备 {device_id}")
+                print(f"📊 API请汁E 返回 {len(results)} 条记录给设夁E{device_id}")
             
             elif parsed_path.path == '/api/status':
-                # 服务器状态
+                # 服务器状态E
                 addon = get_addon_instance()
                 status = {
                     'status': 'running',
@@ -260,7 +260,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 
                 self.wfile.write(json.dumps(status, ensure_ascii=False).encode('utf-8'))
-                print("📊 状态查询请求")
+                print("📊 状态查询请汁E)
             
             elif parsed_path.path == '/cert.pem':
                 # 提供mitmproxy证书下载
@@ -276,9 +276,9 @@ class APIHandler(BaseHTTPRequestHandler):
                         self.send_header('Access-Control-Allow-Origin', '*')
                         self.end_headers()
                         self.wfile.write(cert_data)
-                        print("📜 证书下载请求")
+                        print("📜 证书下载请汁E)
                     else:
-                        # 如果证书不存在，提供帮助信息
+                        # 如果证书不存在�E�提供帮助信息
                         help_html = """
                         <!DOCTYPE html>
                         <html>
@@ -288,13 +288,13 @@ class APIHandler(BaseHTTPRequestHandler):
                         </head>
                         <body>
                             <h1>📜 mitmproxy 证书</h1>
-                            <p>❌ 证书文件未找到</p>
-                            <p>请确保mitmproxy已启动并生成了证书</p>
-                            <h2>替代方案：</h2>
+                            <p>❁E证书斁E��未找到</p>
+                            <p>请确保mitmproxy已启动并生�E亁E��书</p>
+                            <h2>替代方案！E/h2>
                             <ol>
-                                <li>配置代理后访问: <a href="http://mitm.it">http://mitm.it</a></li>
+                                <li>配置代琁E��访问: <a href="http://mitm.it">http://mitm.it</a></li>
                                 <li>选择Android选项下载证书</li>
-                                <li>在设置中安装证书</li>
+                                <li>在设置中安裁E��书</li>
                             </ol>
                         </body>
                         </html>
@@ -310,7 +310,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     self.wfile.write(f'证书下载失败: {e}'.encode('utf-8'))
             
             elif parsed_path.path == '/':
-                # 简单的状态页面
+                # 简单的状态E��面
                 addon = get_addon_instance()
                 
                 # 获取统计信息
@@ -324,7 +324,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>bigjj.site 移动抓包代理服务器</title>
+                    <title>bigjj.site 移动抓包代琁E��务器</title>
                     <meta charset="utf-8">
                     <meta http-equiv="refresh" content="5">
                     <style>
@@ -337,43 +337,43 @@ class APIHandler(BaseHTTPRequestHandler):
                     </style>
                 </head>
                 <body>
-                    <h1>🚀 bigjj.site 移动抓包代理服务器</h1>
+                    <h1>🚀 bigjj.site 移动抓包代琁E��务器</h1>
                     
                     <div class="status">
-                        <p>✅ 服务器正在运行</p>
+                        <p>✁E服务器正在运衁E/p>
                         <div class="stats">
                             <p>📱 活跃WebSocket连接: {websocket_count}</p>
-                            <p>🌐 代理流量总数: {traffic_count}</p>
+                            <p>🌐 代琁E��E��总数: {traffic_count}</p>
                             <p>⏰ 更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                         </div>
                     </div>
                     
                     <div class="cert-download">
                         <h2>🔒 HTTPS证书下载</h2>
-                        <p>要解密HTTPS流量，请下载并安装证书：</p>
+                        <p>要解寁ETTPS流E���E�请下载并安裁E��书�E�E/p>
                         <ul>
                             <li><a href="/cert.pem">📜 下载mitmproxy证书</a></li>
-                            <li><a href="http://mitm.it" target="_blank">🌐 访问 mitm.it 获取证书</a> (需先配置代理)</li>
+                            <li><a href="http://mitm.it" target="_blank">🌐 访问 mitm.it 获取证书</a> (需先�E置代琁E</li>
                         </ul>
                     </div>
                     
                     <h2>配置信息</h2>
                     <ul>
-                        <li>代理地址: bigjj.site:8080</li>  <!-- 使用 mitmweb 服务 -->
+                        <li>代琁E��址: bigjj.site:8080</li>  <!-- 使用 mitmweb 服务 -->
                         <li>WebSocket: {ws_schema}://bigjj.site:8765</li>
                         <li>API接口: {api_schema}://bigjj.site:5010</li>
-                        <li>Web管理: http://bigjj.site:8010</li>
+                        <li>Web管琁E http://bigjj.site:8010</li>
                     </ul>
                     
                     <h2>Android配置步骤</h2>
                     <ol>
-                        <li>WiFi设置 → 修改网络 → 高级选项</li>
-                        <li>代理: 手动</li>
-                        <li>主机名: bigjj.site</li>
+                        <li>WiFi设置 ↁE修改网绁EↁE高级选项</li>
+                        <li>代琁E 手动</li>
+                        <li>主机吁E bigjj.site</li>
                         <li>端口: 8080</li>  <!-- 使用 mitmweb 服务 -->
                     </ol>
                     
-                    <p><small>页面每5秒自动刷新</small></p>
+                    <p><small>页面毁E秒�E动刷新</small></p>
                 </body>
                 </html>
                 """
@@ -390,18 +390,18 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.wfile.write(b'404 Not Found')
                 
         except Exception as e:
-            print(f"❌ API请求处理失败: {e}")
+            print(f"❁EAPI请求夁E��失败: {e}")
             self.send_response(500)
             self.send_header('Content-Type', 'text/plain')
             self.end_headers()
             self.wfile.write(f'500 Internal Server Error: {e}'.encode())
     
     def log_message(self, format, *args):
-        # 禁用默认HTTP日志，减少输出噪音
+        # 禁用默认HTTP日志，减少输�E噪音
         pass
 
 async def websocket_handler(*args):
-    """兼容websockets不同版本签名: (websocket, path) 或 (websocket,)"""
+    """兼容websockets不同版本签吁E (websocket, path) 戁E(websocket,)"""
     if len(args) == 2:
         websocket, _ = args
     else:
@@ -436,7 +436,7 @@ def start_api_server(port=5010, use_ssl=False):
         server = HTTPServer(('0.0.0.0', port), APIHandler)
 
         if use_ssl:
-            # 查找SSL证书文件
+            # 查找SSL证书斁E��
             cert_paths = [
                 '/etc/letsencrypt/live/bigjj.site/fullchain.pem',  # Let's Encrypt
                 '/etc/ssl/certs/bigjj.site.crt',                   # 自定义证书
@@ -444,8 +444,8 @@ def start_api_server(port=5010, use_ssl=False):
             ]
             key_paths = [
                 '/etc/letsencrypt/live/bigjj.site/privkey.pem',    # Let's Encrypt
-                '/etc/ssl/private/bigjj.site.key',                 # 自定义私钥
-                '/opt/mobile-proxy/key.pem'                        # 本地私钥
+                '/etc/ssl/private/bigjj.site.key',                 # 自定义私E��
+                '/opt/mobile-proxy/key.pem'                        # 本地私E��
             ]
             
             cert_file = None
@@ -469,13 +469,13 @@ def start_api_server(port=5010, use_ssl=False):
                 global API_USE_SSL
                 API_USE_SSL = True
             else:
-                print(f"⚠️ SSL证书未找到，使用HTTP模式在端口 {port}")
+                print(f"⚠�E�ESSL证书未找到�E�使用HTTP模式在端口 {port}")
         else:
             print(f"🔗 HTTP API服务器启动在端口 {port}")
             
         server.serve_forever()
     except Exception as e:
-        print(f"❌ API服务器启动失败: {e}")
+        print(f"❁EAPI服务器启动失败: {e}")
         traceback.print_exc()
 
 def start_websocket_server(port=8765, use_ssl=False):
@@ -483,7 +483,7 @@ def start_websocket_server(port=8765, use_ssl=False):
     try:
         print(f"📱 WebSocket服务器启动在端口 {port}")
 
-        # 创建新的事件循环（在独立线程中）
+        # 创建新皁E��件循环�E�在独立线程中�E�E
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
@@ -491,7 +491,7 @@ def start_websocket_server(port=8765, use_ssl=False):
             ssl_context = None
 
             if use_ssl:
-                # 查找SSL证书文件
+                # 查找SSL证书斁E��
                 cert_paths = [
                     '/etc/letsencrypt/live/bigjj.site/fullchain.pem',
                     '/etc/ssl/certs/bigjj.site.crt',
@@ -521,9 +521,9 @@ def start_websocket_server(port=8765, use_ssl=False):
                     ssl_context.load_cert_chain(cert_file, key_file)
                     print(f"🔒 WSS WebSocket服务器 (SSL: {cert_file})")
                 else:
-                    print(f"⚠️ SSL证书未找到，使用WS模式 (ws://bigjj.site:8765)")
+                    print(f"⚠�E�ESSL证书未找到�E�使用WS模弁E(ws://bigjj.site:8765)")
 
-            # 在实际是否启用SSL的结果基础上更新展示用开关
+            # 在实际是否启用SSL皁E��果基础上更新展示用开关
             global WS_USE_SSL
             WS_USE_SSL = bool(ssl_context is not None)
 
@@ -536,27 +536,27 @@ def start_websocket_server(port=8765, use_ssl=False):
                 ping_timeout=10,
                 close_timeout=10
             )
-            print(f"✅ WebSocket服务器成功绑定到 0.0.0.0:{port}")
+            print(f"✁EWebSocket服务器成功绑定到 0.0.0.0:{port}")
             await server.wait_closed()
 
-        # 在独立的事件循环中运行
+        # 在独立的事件循环中运衁E
         loop.run_until_complete(run_server())
     except Exception as e:
-        print(f"❌ WebSocket服务器启动失败: {e}")
+        print(f"❁EWebSocket服务器启动失败: {e}")
         traceback.print_exc()
 
 
 
 def main():
-    # 启动横幅
-    print("🚀 bigjj.site 移动抓包远程代理服务器")
+    # 启动横幁E
+    print("🚀 bigjj.site 移动抓包远程代琁E��务器")
     print("=" * 60)
     
-    # 创建addon实例
+    # 创建addon实侁E
     addon = get_addon_instance()
-    print("✅ TrafficCaptureAddon 实例已创建")
+    print("✁ETrafficCaptureAddon 实例已创建")
     
-    # 启动HTTP API服务器 (线程) - 优先尝试启用HTTPS（若证书存在）
+    # 启动HTTP API服务器 (线稁E - 优�E尝试启用HTTPS�E�若证书存在�E�E
     api_use_ssl = any([
         os.path.exists('/etc/letsencrypt/live/bigjj.site/fullchain.pem') and os.path.exists('/etc/letsencrypt/live/bigjj.site/privkey.pem'),
         os.path.exists('/etc/ssl/certs/bigjj.site.crt') and os.path.exists('/etc/ssl/private/bigjj.site.key'),
@@ -566,8 +566,8 @@ def main():
     api_thread.daemon = True
     api_thread.start()
     
-    # 启动WebSocket服务器 (线程)
-    # 仅当存在有效的 Let's Encrypt 证书时启用 WSS；自签名默认禁用，避免移动端 TLS 失败
+    # 启动WebSocket服务器 (线稁E
+    # 仁E��存在有效皁ELet's Encrypt 证书时启用 WSS�E��E签名默认禁用�E�避免移动端 TLS 失败
     le_cert = '/etc/letsencrypt/live/bigjj.site/fullchain.pem'
     le_key = '/etc/letsencrypt/live/bigjj.site/privkey.pem'
     ws_use_ssl = os.path.exists(le_cert) and os.path.exists(le_key)
@@ -576,49 +576,49 @@ def main():
     ws_thread.start()
     
     print("🌍 域名: bigjj.site")
-    print("📡 代理服务器: bigjj.site:8080")  # 使用 mitmweb 服务
+    print("📡 代琁E��务器: bigjj.site:8080")  # 使用 mitmweb 服务
     print(f"📱 WebSocket: {'wss' if ws_use_ssl else 'ws'}://bigjj.site:8765")
     print(f"🔗 API接口: {'https' if api_use_ssl else 'http'}://bigjj.site:5010")
-    print(f"🌐 状态页面: {'https' if api_use_ssl else 'http'}://bigjj.site:5010")
+    print(f"🌐 状态E��面: {'https' if api_use_ssl else 'http'}://bigjj.site:5010")
     print("=" * 60)
-    print("✅ 所有服务启动完成！")
-    print("📱 请在Android应用中选择'远程代理'模式并配置WiFi代理。")
-    print("🔍 访问 https://bigjj.site:5010 查看服务器状态")
+    print("✁E所有服务启动完�E�E�E)
+    print("📱 请在Android应用中选择'远程代琁E模式并配置WiFi代琁E��E)
+    print("🔍 访问 https://bigjj.site:5010 查看服务器状态E)
     print("🌐 mitmproxy Web界面: http://bigjj.site:8010")
-    print("📝 代理使用现有的 mitmweb.service (端口8080)")
+    print("📝 代琁E��用现有的 mitmweb.service (端口8080)")
     print("=" * 60)
     
     try:
-        # 不再启动自己的 mitmproxy，使用现有的 mitmweb.service
-        print("ℹ️ 使用现有的 mitmweb.service 作为代理服务器")
-        print("ℹ️ 代理端口: 8080 (由 mitmweb.service 提供)")
-        print("ℹ️ 本服务只提供 API 和 WebSocket 功能")
-        print("🔧 如需查看代理流量，请访问: http://bigjj.site:8010")
+        # 不�E启动自己皁Emitmproxy�E�使用现有的 mitmweb.service
+        print("ℹ�E�E使用现有的 mitmweb.service 作为代琁E��务器")
+        print("ℹ�E�E代琁E��口: 8080 (由 mitmweb.service 提侁E")
+        print("ℹ�E�E本服务只提侁EAPI 咁EWebSocket 功�E")
+        print("🔧 如需查看代琁E��E���E�请访问: http://bigjj.site:8010")
         
         # 简单的保持运行循环
         import signal
         import time
         
         def signal_handler(sig, frame):
-            print("\n🛑 收到停止信号，正在关闭服务器...")
+            print("\n🛑 收到停止信号�E�正在关闭服务器...")
             exit(0)
         
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
         
-        print("⭐ 服务器运行中，按 Ctrl+C 停止...")
+        print("⭁E服务器运行中�E�按 Ctrl+C 停止...")
         
-        # 保持服务运行
+        # 保持服务运衁E
         while True:
             time.sleep(1)
         
     except KeyboardInterrupt:
         print("\n🛑 服务器正在关闭...")
     except Exception as e:
-        print(f"❌ 服务器运行失败: {e}")
+        print(f"❁E服务器运行失败: {e}")
         traceback.print_exc()
 
-# 注意：不再需要 mitmproxy addon 函数，我们使用现有的 mitmweb.service
+# 注意：不�E需要Emitmproxy addon 函数�E��E们使用现有的 mitmweb.service
 
 if __name__ == '__main__':
     main()

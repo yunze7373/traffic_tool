@@ -20,7 +20,7 @@ class ProxyConfigurationExamples {
      */
     fun createOkHttpClientWithProxy(): OkHttpClient {
         // 创建代理对象，指向我们的HTTPS代理服务器
-        val proxy = java.net.Proxy(java.net.Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 8888))
+        val proxy = java.net.Proxy(java.net.Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 8080))
         
         return OkHttpClient.Builder()
             .proxy(proxy)
@@ -34,7 +34,7 @@ class ProxyConfigurationExamples {
      * 适用于：使用Java标准网络库的应用
      */
     fun createHttpConnectionWithProxy(urlString: String): HttpURLConnection {
-        val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 8888))
+        val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", 8080))
         val url = URL(urlString)
         return url.openConnection(proxy) as HttpURLConnection
     }
