@@ -352,7 +352,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     <h2>配置信息</h2>
                     <ul>
                         <li>代理地址: bigjj.site:8888</li>
-                        <li>WebSocket: ws://bigjj.site:8765</li>
+                        <li>WebSocket: ws://bigjj.site:8765 (普通连接)</li>
                         <li>API接口: http://bigjj.site:5010</li>
                         <li>Web管理: http://bigjj.site:8010</li>
                     </ul>
@@ -506,7 +506,7 @@ def start_websocket_server(port=8765, use_ssl=False):
                     ssl_context.load_cert_chain(cert_file, key_file)
                     print(f"🔒 WSS WebSocket服务器 (SSL: {cert_file})")
                 else:
-                    print(f"⚠️ SSL证书未找到，使用WS模式")
+                    print(f"⚠️ SSL证书未找到，使用WS模式 (ws://bigjj.site:8765)")
             
             server = await websockets.serve(
                 websocket_handler, 
@@ -559,7 +559,7 @@ def main():
     
     print("🌍 域名: bigjj.site")
     print("📡 代理服务器: bigjj.site:8888")
-    print("📱 WebSocket: ws://bigjj.site:8765")
+    print("📱 WebSocket: ws://bigjj.site:8765 (普通连接)")
     print("🔗 API接口: http://bigjj.site:5010")
     print("🌐 状态页面: http://bigjj.site:5010")
     print("=" * 60)
