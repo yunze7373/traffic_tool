@@ -322,11 +322,16 @@ def start_websocket_server(port=8765):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        start_server = websockets.serve(websocket_handler, "0.0.0.0", port)
-        loop.run_until_complete(start_server)
-        loop.run_forever()
+        async def run_server():
+            server = await websockets.serve(websocket_handler, "0.0.0.0", port)
+            print(f"✅ WebSocket服务器成功绑定到 0.0.0.0:{port}")
+            await server.wait_closed()
+        
+        loop.run_until_complete(run_server())
     except Exception as e:
         print(f"❌ WebSocket服务器启动失败: {e}")
+        import traceback
+        traceback.print_exc()
 
 def main():
     print("🚀 bigjj.site 移动抓包远程代理服务器")
@@ -355,17 +360,20 @@ def main():
     
     try:
         # 启动mitmproxy (主线程)
+        print("🔄 启动mitmproxy代理服务器...")
         mitmdump([
             "-s", __file__, 
             "--listen-port", "8888",
-            "--set", "confdir=~/.mitmproxy",
-            "--set", "web_host=0.0.0.0",
-            "--set", "web_port=8010"
+            "--web-host", "0.0.0.0",
+            "--web-port", "8010",
+            "--set", "confdir=~/.mitmproxy"
         ])
     except KeyboardInterrupt:
         print("\n🛑 服务器正在关闭...")
     except Exception as e:
         print(f"❌ 代理服务器启动失败: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == '__main__':
     main()
