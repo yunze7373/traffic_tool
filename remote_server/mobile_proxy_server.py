@@ -526,8 +526,23 @@ def start_websocket_server(port=8765, use_ssl=False):
         print(f"❌ WebSocket服务器启动失败: {e}")
         traceback.print_exc()
 
+async def run_mitmproxy_async(addon, opts):
+    """异步运行mitmproxy"""
+    from mitmproxy.tools.dump import DumpMaster
+    
+    # 创建DumpMaster，现在我们在运行的事件循环中
+    master = DumpMaster(opts)
+    master.addons.add(addon)
+    
+    print("✅ Addon已注册到mitmproxy")
+    print(f"✅ WebSocket服务器成功绑定到 0.0.0.0:8765")
+    print(f"� HTTP API服务器启动在端口 5010")
+    
+    # 运行mitmproxy
+    await master.run_async()
+
 def main():
-    print("🚀 bigjj.site 移动抓包远程代理服务器")
+    print("�🚀 bigjj.site 移动抓包远程代理服务器")
     print("=" * 60)
     
     # 创建addon实例
@@ -568,7 +583,6 @@ def main():
         
         try:
             from mitmproxy import options
-            from mitmproxy.tools.dump import DumpMaster
         except ImportError as e:
             print(f"❌ 导入mitmproxy模块失败: {e}")
             print("📝 请确保已安装mitmproxy: pip install mitmproxy")
@@ -582,23 +596,8 @@ def main():
             ssl_insecure=True
         )
         
-        # 确保在主线程中有事件循环
-        try:
-            # 尝试获取当前事件循环
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # 如果没有事件循环，创建一个新的
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # 创建DumpMaster（不传入event_loop参数，让它自动检测）
-        master = DumpMaster(opts)
-        master.addons.add(addon)
-        
-        print("✅ Addon已注册到mitmproxy")
-        print(f"✅ WebSocket服务器成功绑定到 0.0.0.0:8765")
-        print(f"🔗 HTTP API服务器启动在端口 5010")
-        master.run()
+        # 使用asyncio.run运行异步函数，这会创建并运行事件循环
+        asyncio.run(run_mitmproxy_async(addon, opts))
         
     except KeyboardInterrupt:
         print("\n🛑 服务器正在关闭...")
