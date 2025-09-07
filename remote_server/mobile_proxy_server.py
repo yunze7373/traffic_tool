@@ -9,6 +9,7 @@ import json
 import os
 import sqlite3
 import ssl
+import traceback
 import websockets
 import threading
 from datetime import datetime
@@ -148,7 +149,6 @@ class MobileProxyAddon:
             # 推送到WebSocket客户端
             if self.websocket_clients:
                 # 使用线程安全的方式发送数据
-                import threading
                 def send_async():
                     try:
                         loop = asyncio.new_event_loop()
@@ -260,7 +260,6 @@ class APIHandler(BaseHTTPRequestHandler):
             elif parsed_path.path == '/cert.pem':
                 # 提供mitmproxy证书下载
                 try:
-                    import os
                     cert_path = os.path.expanduser('~/.mitmproxy/mitmproxy-ca-cert.pem')
                     if os.path.exists(cert_path):
                         with open(cert_path, 'rb') as f:
@@ -450,7 +449,6 @@ def start_api_server(port=5010, use_ssl=False):
                     break
             
             if cert_file and key_file:
-                import ssl
                 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                 context.load_cert_chain(cert_file, key_file)
                 server.socket = context.wrap_socket(server.socket, server_side=True)
@@ -463,7 +461,6 @@ def start_api_server(port=5010, use_ssl=False):
         server.serve_forever()
     except Exception as e:
         print(f"❌ API服务器启动失败: {e}")
-        import traceback
         traceback.print_exc()
 
 def start_websocket_server(port=8765, use_ssl=False):
@@ -505,14 +502,12 @@ def start_websocket_server(port=8765, use_ssl=False):
                         break
                 
                 if cert_file and key_file:
-                    import ssl
                     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                     ssl_context.load_cert_chain(cert_file, key_file)
                     print(f"🔒 WSS WebSocket服务器 (SSL: {cert_file})")
                 else:
                     print(f"⚠️ SSL证书未找到，使用WS模式")
             
-            import websockets
             server = await websockets.serve(
                 websocket_handler, 
                 "0.0.0.0", 
@@ -529,7 +524,6 @@ def start_websocket_server(port=8765, use_ssl=False):
         loop.run_until_complete(run_server())
     except Exception as e:
         print(f"❌ WebSocket服务器启动失败: {e}")
-        import traceback
         traceback.print_exc()
 
 def main():
@@ -589,7 +583,6 @@ def main():
         )
         
         # 确保在主线程中有事件循环
-        import asyncio
         try:
             # 尝试获取当前事件循环
             loop = asyncio.get_event_loop()
@@ -611,7 +604,6 @@ def main():
         print("\n🛑 服务器正在关闭...")
     except Exception as e:
         print(f"❌ 代理服务器启动失败: {e}")
-        import traceback
         traceback.print_exc()
 
 # mitmproxy脚本加载函数 (必须)
