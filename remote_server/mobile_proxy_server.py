@@ -133,13 +133,27 @@ class MobileProxyAddon:
             
             self.traffic_count += 1
             print(f"🌐 [{self.traffic_count}] [{device_id}] {flow.request.method} {flow.request.pretty_url} -> {flow.response.status_code}")
+            print(f"[DEBUG] 当前WebSocket客户端数: {len(self.websocket_clients)}, 流量计数: {self.traffic_count}")
             
             # 保存到数据库
             self.db.save_traffic(traffic_data)
             
             # 推送到WebSocket客户端
             if self.websocket_clients:
-                asyncio.create_task(self.broadcast_to_clients(traffic_data))
+                # 使用线程安全的方式发送数据
+                import threading
+                def send_async():
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(self.broadcast_to_clients(traffic_data))
+                        loop.close()
+                    except Exception as e:
+                        print(f"📱 WebSocket广播失败: {e}")
+                
+                thread = threading.Thread(target=send_async)
+                thread.daemon = True
+                thread.start()
             
         except Exception as e:
             print(f"❌ 处理流量数据失败: {e}")
@@ -282,19 +296,27 @@ class APIHandler(BaseHTTPRequestHandler):
                 <head>
                     <title>bigjj.site 移动抓包代理服务器</title>
                     <meta charset="utf-8">
+                    <meta http-equiv="refresh" content="5">
                     <style>
                         body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                        .status {{ background: #e8f5e8; padding: 10px; border-radius: 5px; margin: 10px 0; }}
                         .cert-download {{ background: #f0f8ff; padding: 15px; border-radius: 5px; margin: 20px 0; }}
                         .cert-download a {{ color: #1e90ff; text-decoration: none; }}
                         .cert-download a:hover {{ text-decoration: underline; }}
+                        .stats {{ font-size: 18px; font-weight: bold; }}
                     </style>
                 </head>
                 <body>
                     <h1>🚀 bigjj.site 移动抓包代理服务器</h1>
-                    <p>✅ 服务器正在运行</p>
-                    <p>📱 活跃连接: {len(proxy_addon.websocket_clients)}</p>
-                    <p>🌐 总流量: {proxy_addon.traffic_count}</p>
-                    <p>⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                    
+                    <div class="status">
+                        <p>✅ 服务器正在运行</p>
+                        <div class="stats">
+                            <p>📱 活跃WebSocket连接: {len(proxy_addon.websocket_clients)}</p>
+                            <p>🌐 代理流量总数: {proxy_addon.traffic_count}</p>
+                            <p>⏰ 更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                        </div>
+                    </div>
                     
                     <div class="cert-download">
                         <h2>🔒 HTTPS证书下载</h2>
@@ -320,6 +342,8 @@ class APIHandler(BaseHTTPRequestHandler):
                         <li>主机名: bigjj.site</li>
                         <li>端口: 8888</li>
                     </ol>
+                    
+                    <p><small>页面每5秒自动刷新</small></p>
                 </body>
                 </html>
                 """
