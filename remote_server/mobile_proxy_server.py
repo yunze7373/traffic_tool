@@ -183,7 +183,9 @@ class MobileProxyAddon:
     
     def get_device_id(self, flow):
         # 从请求头或IP识别设备
-        client_ip = flow.client_conn.address[0]
+        # 使用peername替代address以避免弃用警告
+        client_addr = getattr(flow.client_conn, 'peername', flow.client_conn.address)
+        client_ip = client_addr[0] if client_addr else "unknown"
         user_agent = flow.request.headers.get('User-Agent', '')
         
         if 'TrafficCapture' in user_agent:
