@@ -26,6 +26,9 @@ except ImportError:
     MITMPROXY_AVAILABLE = False
     print("⚠️ mitmproxy模块未安装，部分功能可能受限")
 
+    # WebSocket是否启用SSL（供页面展示）
+    WS_USE_SSL = False
+
 class TrafficDatabase:
     def __init__(self, db_path='mobile_traffic.db'):
         self.db_path = db_path
@@ -245,6 +248,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 status = {
                     'status': 'running',
                     'domain': 'bigjj.site',
+                    'ws_scheme': 'wss' if WS_USE_SSL else 'ws',
+                    'ws_url': f"{'wss' if WS_USE_SSL else 'ws'}://bigjj.site:8765",
                     'active_connections': len(addon.websocket_clients),
                     'total_traffic': addon.traffic_count,
                     'timestamp': datetime.now().isoformat()
@@ -313,6 +318,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 websocket_count = len(addon.websocket_clients)
                 traffic_count = addon.traffic_count
                 
+                # 根据当前WebSocket模式显示正确的schema
+                ws_schema = 'wss' if WS_USE_SSL else 'ws'
                 html = f"""
                 <!DOCTYPE html>
                 <html>
@@ -353,7 +360,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     <h2>配置信息</h2>
                     <ul>
                         <li>代理地址: bigjj.site:8888</li>
-                        <li>WebSocket: ws://bigjj.site:8765 (普通连接)</li>
+                        <li>WebSocket: {ws_schema}://bigjj.site:8765</li>
                         <li>API接口: http://bigjj.site:5010</li>
                         <li>Web管理: http://bigjj.site:8010</li>
                     </ul>
@@ -473,14 +480,14 @@ def start_websocket_server(port=8765, use_ssl=False):
     """启动WebSocket服务器"""
     try:
         print(f"📱 WebSocket服务器启动在端口 {port}")
-        
+
         # 创建新的事件循环（在独立线程中）
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         async def run_server():
             ssl_context = None
-            
+
             if use_ssl:
                 # 查找SSL证书文件
                 cert_paths = [
@@ -493,27 +500,27 @@ def start_websocket_server(port=8765, use_ssl=False):
                     '/etc/ssl/private/bigjj.site.key',
                     '/opt/mobile-proxy/key.pem'
                 ]
-                
+
                 cert_file = None
                 key_file = None
-                
+
                 for cert_path in cert_paths:
                     if os.path.exists(cert_path):
                         cert_file = cert_path
                         break
-                
+
                 for key_path in key_paths:
                     if os.path.exists(key_path):
                         key_file = key_path
                         break
-                
+
                 if cert_file and key_file:
                     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                     ssl_context.load_cert_chain(cert_file, key_file)
                     print(f"🔒 WSS WebSocket服务器 (SSL: {cert_file})")
                 else:
                     print(f"⚠️ SSL证书未找到，使用WS模式 (ws://bigjj.site:8765)")
-            
+
             server = await websockets.serve(
                 websocket_handler,
                 "0.0.0.0",
@@ -525,12 +532,42 @@ def start_websocket_server(port=8765, use_ssl=False):
             )
             print(f"✅ WebSocket服务器成功绑定到 0.0.0.0:{port}")
             await server.wait_closed()
-        
-        # 在独立的事件循环中运行
+
+        # 在独立的事件循环中运行，并记录全局WS模式供页面展示
+        global WS_USE_SSL
+        WS_USE_SSL = bool(use_ssl)
         loop.run_until_complete(run_server())
     except Exception as e:
         print(f"❌ WebSocket服务器启动失败: {e}")
         traceback.print_exc()
+
+def ensure_mitmproxy_config(confdir: str):
+    """确保 mitmproxy 配置禁用 block_global"""
+    try:
+        path = os.path.expanduser(confdir)
+        os.makedirs(path, exist_ok=True)
+        cfg = os.path.join(path, 'config.yaml')
+        content = ''
+        if os.path.exists(cfg):
+            try:
+                with open(cfg, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except Exception:
+                content = ''
+        if 'block_global' not in content:
+            # 追加或写入设置，确保关闭外网阻止
+            with open(cfg, 'a', encoding='utf-8') as f:
+                f.write("\nblock_global: false\n")
+            print(f"✅ 已在 {cfg} 中写入 block_global: false")
+        else:
+            # 简单替换为 false
+            if 'block_global: true' in content:
+                newc = content.replace('block_global: true', 'block_global: false')
+                with open(cfg, 'w', encoding='utf-8') as f:
+                    f.write(newc)
+                print(f"✅ 已将 {cfg} 中的 block_global 设置为 false")
+    except Exception as e:
+        print(f"⚠️ 写入 mitmproxy 配置失败(可忽略): {e}")
 
 async def run_mitmproxy_async(addon, opts):
     """异步运行mitmproxy"""
@@ -538,6 +575,16 @@ async def run_mitmproxy_async(addon, opts):
     
     # 创建DumpMaster，现在我们在运行的事件循环中
     master = DumpMaster(opts)
+    # 运行期再次确保关闭 block_global 限制
+    try:
+        if hasattr(master, 'options'):
+            try:
+                master.options.set('block_global', False)
+                print("✅ 已在运行期关闭 block_global (master.options.set)")
+            except Exception as e:
+                print(f"⚠️ 运行期关闭 block_global 失败: {e}")
+    except Exception:
+        pass
     master.addons.add(addon)
     
     print("✅ Addon已注册到mitmproxy")
@@ -560,17 +607,10 @@ def main():
     api_thread.start()
     
     # 启动WebSocket服务器 (线程)
-    # 自动检测证书决定是否启用 WSS
-    cert_candidate = [
-        '/etc/letsencrypt/live/bigjj.site/fullchain.pem',
-        '/opt/mobile-proxy/cert.pem'
-    ]
-    key_candidate = [
-        '/etc/letsencrypt/live/bigjj.site/privkey.pem',
-        '/opt/mobile-proxy/key.pem'
-    ]
-    has_cert = any(os.path.exists(p) for p in cert_candidate) and any(os.path.exists(p) for p in key_candidate)
-    ws_use_ssl = has_cert
+    # 仅当存在有效的 Let's Encrypt 证书时启用 WSS；自签名默认禁用，避免移动端 TLS 失败
+    le_cert = '/etc/letsencrypt/live/bigjj.site/fullchain.pem'
+    le_key = '/etc/letsencrypt/live/bigjj.site/privkey.pem'
+    ws_use_ssl = os.path.exists(le_cert) and os.path.exists(le_key)
     ws_thread = threading.Thread(target=start_websocket_server, args=(8765, ws_use_ssl))
     ws_thread.daemon = True
     ws_thread.start()
@@ -603,13 +643,17 @@ def main():
             print(f"❌ 导入mitmproxy模块失败: {e}")
             print("📝 请确保已安装mitmproxy: pip install mitmproxy")
             return
-        
+
+        # 确保配置目录禁用 block_global
+        confdir = "~/.mitmproxy"
+        ensure_mitmproxy_config(confdir)
+
         # 动态创建mitmproxy选项，兼容不同版本，优先尝试使用可能存在的 block_global，再自动降级
         def create_mitmproxy_options():
             base_args = dict(
                 listen_host="0.0.0.0",      # 监听全部地址
                 listen_port=8888,
-                confdir="~/.mitmproxy",
+                confdir=confdir,
                 mode=["regular"],          # 基础正向代理模式
                 ssl_insecure=True           # 允许自签名证书（便于抓取）
             )
