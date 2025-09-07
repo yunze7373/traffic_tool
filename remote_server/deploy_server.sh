@@ -27,12 +27,33 @@ source ~/.bashrc
 
 # 4. 配置防火墙
 echo "🔥 配置防火墙规则..."
-sudo ufw allow 8888/tcp  # 代理端口
-sudo ufw allow 5010/tcp  # API端口
-sudo ufw allow 8765/tcp  # WebSocket端口
-sudo ufw allow 8010/tcp  # mitmproxy web界面
-sudo ufw allow 22/tcp    # SSH (确保不被锁定)
-sudo ufw --force enable
+
+# 检测操作系统类型
+if command -v ufw >/dev/null 2>&1; then
+    # Ubuntu/Debian 系统使用 ufw
+    echo "检测到 Ubuntu/Debian 系统，使用 ufw..."
+    sudo ufw allow 8888/tcp  # 代理端口
+    sudo ufw allow 5010/tcp  # API端口
+    sudo ufw allow 8765/tcp  # WebSocket端口
+    sudo ufw allow 8010/tcp  # mitmproxy web界面
+    sudo ufw allow 22/tcp    # SSH (确保不被锁定)
+    sudo ufw --force enable
+elif command -v firewall-cmd >/dev/null 2>&1; then
+    # CentOS/RHEL/Amazon Linux 系统使用 firewalld
+    echo "检测到 CentOS/RHEL/Amazon Linux 系统，使用 firewalld..."
+    sudo systemctl start firewalld
+    sudo systemctl enable firewalld
+    sudo firewall-cmd --permanent --add-port=8888/tcp  # 代理端口
+    sudo firewall-cmd --permanent --add-port=5010/tcp  # API端口
+    sudo firewall-cmd --permanent --add-port=8765/tcp  # WebSocket端口
+    sudo firewall-cmd --permanent --add-port=8010/tcp  # mitmproxy web界面
+    sudo firewall-cmd --permanent --add-service=ssh    # SSH (确保不被锁定)
+    sudo firewall-cmd --reload
+    echo "✅ firewalld 规则已配置"
+else
+    echo "⚠️  未检测到防火墙管理工具，请手动配置防火墙规则"
+    echo "需要开放端口: 8888, 5010, 8765, 8010"
+fi
 
 # 5. 创建服务目录
 echo "📁 创建服务目录..."
@@ -42,8 +63,16 @@ cd /opt/mobile-proxy
 
 # 6. 复制服务器脚本
 echo "📄 部署服务器脚本..."
-if [ -f "$(dirname "$0")/mobile_proxy_server.py" ]; then
-    cp "$(dirname "$0")/mobile_proxy_server.py" /opt/mobile-proxy/
+
+# 获取脚本所在目录的绝对路径
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -f "$SCRIPT_DIR/mobile_proxy_server.py" ]; then
+    cp "$SCRIPT_DIR/mobile_proxy_server.py" /opt/mobile-proxy/
+    echo "✅ 脚本复制成功"
+elif [ -f "mobile_proxy_server.py" ]; then
+    # 如果在当前目录
+    cp "mobile_proxy_server.py" /opt/mobile-proxy/
     echo "✅ 脚本复制成功"
 else
     echo "❌ 未找到 mobile_proxy_server.py 文件"
