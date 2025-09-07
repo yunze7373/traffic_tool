@@ -677,9 +677,12 @@ def main():
             try:
                 test_args = dict(base_args)
                 test_args["block_global"] = False
-                return options.Options(**test_args)
-            except KeyError:
-                print("ℹ️ 'block_global' 选项在当前mitmproxy版本中不可用，将使用默认全局监听设置。")
+                opts = options.Options(**test_args)
+                print("✅ 已在mitmproxy选项中设置 block_global=False")
+                return opts
+            except (KeyError, TypeError) as e:
+                print(f"ℹ️ 'block_global' 选项在当前mitmproxy版本中不可用: {e}")
+                print("ℹ️ 使用默认配置，大多数新版本默认允许全局连接")
                 return options.Options(**base_args)
             except Exception as e:
                 print(f"⚠️ 创建带扩展参数的mitmproxy配置失败: {e}，尝试最小配置。")
@@ -690,14 +693,21 @@ def main():
                     raise
 
         opts = create_mitmproxy_options()
-        # 确保关闭 block_global （某些版本默认开启阻止外网）
+        
+        # 运行期再次尝试禁用 block_global （多重保险）
         try:
-            if hasattr(opts, 'update'):
+            # 方法1: 通过update方法
+            if hasattr(opts, 'update') and callable(opts.update):
                 opts.update(block_global=False)
-                print("✅ 已尝试通过 opts.update 关闭 block_global")
+                print("✅ 已通过 opts.update 关闭 block_global")
+            # 方法2: 直接设置属性  
             elif hasattr(opts, 'block_global'):
                 setattr(opts, 'block_global', False)
                 print("✅ 已通过 setattr 关闭 block_global")
+            else:
+                print("ℹ️ 当前mitmproxy版本无 block_global 选项，跳过设置")
+        except Exception as e:
+            print(f"⚠️ 运行期关闭 block_global 失败(可忽略): {e}")
         except Exception as e:
             print(f"⚠️ 关闭 block_global 失败(可忽略): {e}")
         
