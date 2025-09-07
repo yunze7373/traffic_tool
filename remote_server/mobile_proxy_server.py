@@ -393,24 +393,29 @@ class APIHandler(BaseHTTPRequestHandler):
         # 禁用默认HTTP日志，减少输出噪音
         pass
 
-async def websocket_handler(websocket, path):
-    """WebSocket连接处理"""
-    client_info = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
+async def websocket_handler(*args):
+    """兼容websockets不同版本签名: (websocket, path) 或 (websocket,)"""
+    if len(args) == 2:
+        websocket, _ = args
+    else:
+        websocket = args[0]
+    try:
+        client_host, client_port = websocket.remote_address[:2]
+        client_info = f"{client_host}:{client_port}"
+    except Exception:
+        client_info = "unknown"
     print(f"📱 WebSocket连接: {client_info}")
-    
+
     addon = get_addon_instance()
     addon.add_websocket_client(websocket)
-    
+
     try:
-        # 发送欢迎消息
         welcome = {
             'type': 'welcome',
             'server': 'bigjj.site',
             'timestamp': datetime.now().isoformat()
         }
         await websocket.send(json.dumps(welcome))
-        
-        # 等待连接关闭
         await websocket.wait_closed()
     except Exception as e:
         print(f"📱 WebSocket错误: {e}")
@@ -510,9 +515,9 @@ def start_websocket_server(port=8765, use_ssl=False):
                     print(f"⚠️ SSL证书未找到，使用WS模式 (ws://bigjj.site:8765)")
             
             server = await websockets.serve(
-                lambda websocket: websocket_handler(websocket, websocket.path), 
-                "0.0.0.0", 
-                port, 
+                websocket_handler,
+                "0.0.0.0",
+                port,
                 ssl=ssl_context,
                 ping_interval=20,
                 ping_timeout=10,
@@ -555,13 +560,24 @@ def main():
     api_thread.start()
     
     # 启动WebSocket服务器 (线程)
-    ws_thread = threading.Thread(target=start_websocket_server, args=(8765,))
+    # 自动检测证书决定是否启用 WSS
+    cert_candidate = [
+        '/etc/letsencrypt/live/bigjj.site/fullchain.pem',
+        '/opt/mobile-proxy/cert.pem'
+    ]
+    key_candidate = [
+        '/etc/letsencrypt/live/bigjj.site/privkey.pem',
+        '/opt/mobile-proxy/key.pem'
+    ]
+    has_cert = any(os.path.exists(p) for p in cert_candidate) and any(os.path.exists(p) for p in key_candidate)
+    ws_use_ssl = has_cert
+    ws_thread = threading.Thread(target=start_websocket_server, args=(8765, ws_use_ssl))
     ws_thread.daemon = True
     ws_thread.start()
     
     print("🌍 域名: bigjj.site")
     print("📡 代理服务器: bigjj.site:8888")
-    print("📱 WebSocket: ws://bigjj.site:8765 (普通连接)")
+    print(f"📱 WebSocket: {'wss' if ws_use_ssl else 'ws'}://bigjj.site:8765")
     print("🔗 API接口: http://bigjj.site:5010")
     print("🌐 状态页面: http://bigjj.site:5010")
     print("=" * 60)
@@ -614,6 +630,16 @@ def main():
                     raise
 
         opts = create_mitmproxy_options()
+        # 确保关闭 block_global （某些版本默认开启阻止外网）
+        try:
+            if hasattr(opts, 'update'):
+                opts.update(block_global=False)
+                print("✅ 已尝试通过 opts.update 关闭 block_global")
+            elif hasattr(opts, 'block_global'):
+                setattr(opts, 'block_global', False)
+                print("✅ 已通过 setattr 关闭 block_global")
+        except Exception as e:
+            print(f"⚠️ 关闭 block_global 失败(可忽略): {e}")
         
         # 使用asyncio.run运行异步函数，这会创建并运行事件循环
         asyncio.run(run_mitmproxy_async(addon, opts))
