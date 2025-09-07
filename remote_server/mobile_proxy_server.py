@@ -598,8 +598,8 @@ def main():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
         
-        # 创建DumpMaster并传入事件循环
-        master = DumpMaster(opts, event_loop=loop)
+        # 创建DumpMaster（不传入event_loop参数，让它自动检测）
+        master = DumpMaster(opts)
         master.addons.add(addon)
         
         print("✅ Addon已注册到mitmproxy")
