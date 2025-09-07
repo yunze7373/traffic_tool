@@ -21,14 +21,7 @@ import urllib.parse
 WS_USE_SSL = False
 API_USE_SSL = False
 
-# 尝试导入mitmproxy模块
-try:
-    from mitmproxy import http
-    from mitmproxy.tools.main import mitmdump
-    MITMPROXY_AVAILABLE = True
-except ImportError:
-    MITMPROXY_AVAILABLE = False
-    print("⚠️ mitmproxy模块未安装，部分功能可能受限")
+# 注意：不再使用自定义 mitmproxy，而是依赖现有的 mitmweb.service
 
 
 class TrafficDatabase:
@@ -366,7 +359,7 @@ class APIHandler(BaseHTTPRequestHandler):
                     
                     <h2>配置信息</h2>
                     <ul>
-                        <li>代理地址: bigjj.site:8888</li>
+                        <li>代理地址: bigjj.site:8080</li>  <!-- 使用 mitmweb 服务 -->
                         <li>WebSocket: {ws_schema}://bigjj.site:8765</li>
                         <li>API接口: {api_schema}://bigjj.site:5010</li>
                         <li>Web管理: http://bigjj.site:8010</li>
@@ -377,7 +370,7 @@ class APIHandler(BaseHTTPRequestHandler):
                         <li>WiFi设置 → 修改网络 → 高级选项</li>
                         <li>代理: 手动</li>
                         <li>主机名: bigjj.site</li>
-                        <li>端口: 8888</li>
+                        <li>端口: 8080</li>  <!-- 使用 mitmweb 服务 -->
                     </ol>
                     
                     <p><small>页面每5秒自动刷新</small></p>
@@ -552,67 +545,7 @@ def start_websocket_server(port=8765, use_ssl=False):
         print(f"❌ WebSocket服务器启动失败: {e}")
         traceback.print_exc()
 
-def ensure_mitmproxy_config(confdir: str):
-    """确保 mitmproxy 配置禁用 block_global"""
-    try:
-        path = os.path.expanduser(confdir)
-        os.makedirs(path, exist_ok=True)
-        cfg = os.path.join(path, 'config.yaml')
-        content = ''
-        if os.path.exists(cfg):
-            try:
-                with open(cfg, 'r', encoding='utf-8') as f:
-                    content = f.read()
-            except Exception:
-                content = ''
-        if 'block_global' not in content:
-            # 追加或写入设置，确保关闭外网阻止
-            with open(cfg, 'a', encoding='utf-8') as f:
-                f.write("\nblock_global: false\n")
-            print(f"✅ 已在 {cfg} 中写入 block_global: false")
-        else:
-            # 简单替换为 false
-            if 'block_global: true' in content:
-                newc = content.replace('block_global: true', 'block_global: false')
-                with open(cfg, 'w', encoding='utf-8') as f:
-                    f.write(newc)
-                print(f"✅ 已将 {cfg} 中的 block_global 设置为 false")
-    except Exception as e:
-        print(f"⚠️ 写入 mitmproxy 配置失败(可忽略): {e}")
 
-async def run_mitmproxy_async(addon, opts):
-    """异步运行mitmproxy"""
-    from mitmproxy.tools.dump import DumpMaster
-    
-    # 创建DumpMaster，现在我们在运行的事件循环中
-    master = DumpMaster(opts)
-    
-    # 运行期再次确保关闭 block_global 限制（多种方法）
-    try:
-        if hasattr(master, 'options'):
-            # 方法1: 使用 options.set
-            try:
-                master.options.set('block_global', False)
-                print("✅ 已在运行期关闭 block_global (master.options.set)")
-            except Exception as e1:
-                print(f"⚠️ master.options.set 失败: {e1}")
-                
-                # 方法2: 直接设置属性
-                try:
-                    if hasattr(master.options, 'block_global'):
-                        master.options.block_global = False
-                        print("✅ 已通过直接赋值关闭 master.options.block_global")
-                except Exception as e2:
-                    print(f"⚠️ 直接设置 master.options.block_global 失败: {e2}")
-    except Exception as e:
-        print(f"⚠️ 访问 master.options 失败: {e}")
-    
-    master.addons.add(addon)
-    
-    print("✅ Addon已注册到mitmproxy")
-    
-    # 运行mitmproxy（Master.run() 是一个coroutine）
-    await master.run()
 
 def main():
     # 启动横幅
@@ -643,7 +576,7 @@ def main():
     ws_thread.start()
     
     print("🌍 域名: bigjj.site")
-    print("📡 代理服务器: bigjj.site:8888")
+    print("📡 代理服务器: bigjj.site:8080")  # 使用 mitmweb 服务
     print(f"📱 WebSocket: {'wss' if ws_use_ssl else 'ws'}://bigjj.site:8765")
     print(f"🔗 API接口: {'https' if api_use_ssl else 'http'}://bigjj.site:5010")
     print(f"🌐 状态页面: {'https' if api_use_ssl else 'http'}://bigjj.site:5010")
@@ -651,101 +584,41 @@ def main():
     print("✅ 所有服务启动完成！")
     print("📱 请在Android应用中选择'远程代理'模式并配置WiFi代理。")
     print("🔍 访问 https://bigjj.site:5010 查看服务器状态")
+    print("🌐 mitmproxy Web界面: http://bigjj.site:8010")
+    print("📝 代理使用现有的 mitmweb.service (端口8080)")
     print("=" * 60)
     
     try:
-        # 启动mitmproxy (主线程) - 允许所有连接
-        print("🔄 启动mitmproxy代理服务器...")
-        print(f"📄 加载Addon: {addon.__class__.__name__}")
+        # 不再启动自己的 mitmproxy，使用现有的 mitmweb.service
+        print("ℹ️ 使用现有的 mitmweb.service 作为代理服务器")
+        print("ℹ️ 代理端口: 8080 (由 mitmweb.service 提供)")
+        print("ℹ️ 本服务只提供 API 和 WebSocket 功能")
+        print("🔧 如需查看代理流量，请访问: http://bigjj.site:8010")
         
-        # 检查mitmproxy是否可用
-        if not MITMPROXY_AVAILABLE:
-            print("❌ mitmproxy未安装，无法启动代理服务器")
-            print("📝 请在生产环境中安装: pip install mitmproxy")
-            return
+        # 简单的保持运行循环
+        import signal
+        import time
         
-        try:
-            from mitmproxy import options
-        except ImportError as e:
-            print(f"❌ 导入mitmproxy模块失败: {e}")
-            print("📝 请确保已安装mitmproxy: pip install mitmproxy")
-            return
-
-        # 确保配置目录禁用 block_global
-        confdir = "~/.mitmproxy"
-        ensure_mitmproxy_config(confdir)
-
-        # 动态创建mitmproxy选项，兼容不同版本，优先尝试使用可能存在的 block_global，再自动降级
-        def create_mitmproxy_options():
-            base_args = dict(
-                listen_host="0.0.0.0",      # 监听全部地址
-                listen_port=8888,
-                confdir=confdir,
-                mode=["regular"],          # 基础正向代理模式
-                ssl_insecure=True           # 允许自签名证书（便于抓取）
-            )
-            
-            # 强制尝试多种方式禁用 block_global
-            for attempt_name, attempt_args in [
-                ("block_global=False", {**base_args, "block_global": False}),
-                ("block-global=False", {**base_args, "block-global": False}), 
-                ("基础配置", base_args)
-            ]:
-                try:
-                    opts = options.Options(**attempt_args)
-                    print(f"✅ 成功创建mitmproxy选项 ({attempt_name})")
-                    return opts
-                except (KeyError, TypeError) as e:
-                    print(f"ℹ️ 尝试 {attempt_name} 失败: {e}")
-                    continue
-                except Exception as e:
-                    print(f"⚠️ 尝试 {attempt_name} 异常: {e}")
-                    continue
-            
-            # 最后的fallback
-            try:
-                return options.Options(listen_port=8888)
-            except Exception as e:
-                print(f"❌ 创建最小mitmproxy配置失败: {e}")
-                raise
-
-        opts = create_mitmproxy_options()
+        def signal_handler(sig, frame):
+            print("\n🛑 收到停止信号，正在关闭服务器...")
+            exit(0)
         
-        # 运行期再次尝试禁用 block_global （多重保险）
-        try:
-            # 方法1: 直接设置属性  
-            if hasattr(opts, 'block_global'):
-                opts.block_global = False
-                print("✅ 已通过直接赋值关闭 block_global")
-            # 方法2: 通过 set 方法
-            elif hasattr(opts, 'set') and callable(opts.set):
-                try:
-                    opts.set('block_global', False)
-                    print("✅ 已通过 opts.set 关闭 block_global")
-                except Exception:
-                    pass
-            else:
-                print("ℹ️ 当前mitmproxy版本无 block_global 选项，跳过设置")
-        except Exception as e:
-            print(f"⚠️ 运行期关闭 block_global 失败(可忽略): {e}")
-        except Exception as e:
-            print(f"⚠️ 关闭 block_global 失败(可忽略): {e}")
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
         
-        # 使用asyncio.run运行异步函数，这会创建并运行事件循环
-        asyncio.run(run_mitmproxy_async(addon, opts))
+        print("⭐ 服务器运行中，按 Ctrl+C 停止...")
+        
+        # 保持服务运行
+        while True:
+            time.sleep(1)
         
     except KeyboardInterrupt:
         print("\n🛑 服务器正在关闭...")
     except Exception as e:
-        print(f"❌ 代理服务器启动失败: {e}")
+        print(f"❌ 服务器运行失败: {e}")
         traceback.print_exc()
 
-# mitmproxy脚本加载函数 (必须)
-def addons():
-    """mitmproxy会调用这个函数来获取addon"""
-    addon = get_addon_instance()
-    print("✅ 通过addons()函数返回TrafficCaptureAddon实例")
-    return [addon]
+# 注意：不再需要 mitmproxy addon 函数，我们使用现有的 mitmweb.service
 
 if __name__ == '__main__':
     main()
