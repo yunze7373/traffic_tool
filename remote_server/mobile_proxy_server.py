@@ -198,8 +198,16 @@ class MobileProxyAddon:
         for client in disconnected:
             self.websocket_clients.discard(client)
 
-# 全局实例
-proxy_addon = MobileProxyAddon()
+# 全局addon实例 (统一使用这一个)
+addon_instance = None
+
+def get_addon_instance():
+    """获取或创建addon实例"""
+    global addon_instance
+    if addon_instance is None:
+        addon_instance = MobileProxyAddon()
+        print("✅ 创建MobileProxyAddon实例")
+    return addon_instance
 
 class APIHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -212,7 +220,8 @@ class APIHandler(BaseHTTPRequestHandler):
                 device_id = query_params.get('device_id', [''])[0]
                 limit = int(query_params.get('limit', ['100'])[0])
                 
-                results = proxy_addon.db.get_traffic(device_id, limit)
+                addon = get_addon_instance()
+                results = addon.db.get_traffic(device_id, limit)
                 
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -224,11 +233,12 @@ class APIHandler(BaseHTTPRequestHandler):
             
             elif parsed_path.path == '/api/status':
                 # 服务器状态
+                addon = get_addon_instance()
                 status = {
                     'status': 'running',
                     'domain': 'bigjj.site',
-                    'active_connections': len(proxy_addon.websocket_clients),
-                    'total_traffic': proxy_addon.traffic_count,
+                    'active_connections': len(addon.websocket_clients),
+                    'total_traffic': addon.traffic_count,
                     'timestamp': datetime.now().isoformat()
                 }
                 
@@ -290,6 +300,12 @@ class APIHandler(BaseHTTPRequestHandler):
             
             elif parsed_path.path == '/':
                 # 简单的状态页面
+                addon = get_addon_instance()
+                
+                # 获取统计信息
+                websocket_count = len(addon.websocket_clients)
+                traffic_count = addon.traffic_count
+                
                 html = f"""
                 <!DOCTYPE html>
                 <html>
@@ -312,8 +328,8 @@ class APIHandler(BaseHTTPRequestHandler):
                     <div class="status">
                         <p>✅ 服务器正在运行</p>
                         <div class="stats">
-                            <p>📱 活跃WebSocket连接: {len(proxy_addon.websocket_clients)}</p>
-                            <p>🌐 代理流量总数: {proxy_addon.traffic_count}</p>
+                            <p>📱 活跃WebSocket连接: {websocket_count}</p>
+                            <p>🌐 代理流量总数: {traffic_count}</p>
                             <p>⏰ 更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                         </div>
                     </div>
@@ -375,7 +391,9 @@ async def websocket_handler(websocket, path):
     client_info = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
     print(f"📱 WebSocket连接: {client_info}")
     
-    proxy_addon.add_websocket_client(websocket)
+    addon = get_addon_instance()
+    addon.add_websocket_client(websocket)
+    
     try:
         # 发送欢迎消息
         welcome = {
@@ -390,7 +408,7 @@ async def websocket_handler(websocket, path):
     except Exception as e:
         print(f"📱 WebSocket错误: {e}")
     finally:
-        proxy_addon.remove_websocket_client(websocket)
+        addon.remove_websocket_client(websocket)
         print(f"📱 WebSocket断开: {client_info}")
 
 def start_api_server(port=5010, use_ssl=False):
@@ -501,6 +519,10 @@ def main():
     print("🚀 bigjj.site 移动抓包远程代理服务器")
     print("=" * 60)
     
+    # 创建addon实例
+    addon = get_addon_instance()
+    print("✅ TrafficCaptureAddon 实例已创建")
+    
     # 启动HTTP API服务器 (线程)
     api_thread = threading.Thread(target=start_api_server, args=(5010,))
     api_thread.daemon = True
@@ -525,21 +547,42 @@ def main():
     try:
         # 启动mitmproxy (主线程) - 允许所有连接
         print("🔄 启动mitmproxy代理服务器...")
-        mitmdump([
-            "-s", __file__, 
-            "--listen-port", "8888",
-            "--set", "confdir=~/.mitmproxy",
-            "--set", "block_global=false",  # 允许全球连接
-            "--set", "allow_hosts=.*",      # 允许所有主机
-            "--mode", "regular@8888",       # 明确指定代理模式
-            "--set", "ssl_insecure=true"    # 忽略SSL证书错误
-        ])
+        print(f"📄 加载Addon: {addon.__class__.__name__}")
+        
+        from mitmproxy import options
+        from mitmproxy.tools.dump import DumpMaster
+        
+        # 配置mitmproxy选项
+        opts = options.Options(
+            listen_port=8888,
+            confdir="~/.mitmproxy",
+            block_global=False,
+            allow_hosts=".*",
+            mode=["regular@8888"],
+            ssl_insecure=True,
+            stream_large_bodies=1
+        )
+        
+        # 创建DumpMaster并添加addon
+        master = DumpMaster(opts)
+        master.addons.add(addon)
+        
+        print("✅ Addon已注册到mitmproxy")
+        master.run()
+        
     except KeyboardInterrupt:
         print("\n🛑 服务器正在关闭...")
     except Exception as e:
         print(f"❌ 代理服务器启动失败: {e}")
         import traceback
         traceback.print_exc()
+
+# mitmproxy脚本加载函数 (必须)
+def addons():
+    """mitmproxy会调用这个函数来获取addon"""
+    addon = get_addon_instance()
+    print("✅ 通过addons()函数返回TrafficCaptureAddon实例")
+    return [addon]
 
 if __name__ == '__main__':
     main()
