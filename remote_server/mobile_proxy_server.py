@@ -6,7 +6,9 @@
 
 import asyncio
 import json
+import os
 import sqlite3
+import ssl
 import websockets
 import threading
 from datetime import datetime
@@ -14,7 +16,6 @@ from mitmproxy import http
 from mitmproxy.tools.main import mitmdump
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.parse
-import ssl
 
 class TrafficDatabase:
     def __init__(self, db_path='mobile_traffic.db'):
@@ -307,8 +308,8 @@ class APIHandler(BaseHTTPRequestHandler):
                     <h2>配置信息</h2>
                     <ul>
                         <li>代理地址: bigjj.site:8888</li>
-                        <li>WebSocket: ws://bigjj.site:8765</li>
-                        <li>API接口: http://bigjj.site:5010</li>
+                        <li>WebSocket: wss://bigjj.site:8765</li>
+                        <li>API接口: https://bigjj.site:5010</li>
                         <li>Web管理: http://bigjj.site:8010</li>
                     </ul>
                     
@@ -368,16 +369,55 @@ async def websocket_handler(websocket, path):
         proxy_addon.remove_websocket_client(websocket)
         print(f"📱 WebSocket断开: {client_info}")
 
-def start_api_server(port=5010):
+def start_api_server(port=5010, use_ssl=True):
     """启动HTTP API服务器"""
     try:
         server = HTTPServer(('0.0.0.0', port), APIHandler)
-        print(f"🔗 HTTP API服务器启动在端口 {port}")
+        
+        if use_ssl:
+            # 查找SSL证书文件
+            cert_paths = [
+                '/etc/letsencrypt/live/bigjj.site/fullchain.pem',  # Let's Encrypt
+                '/etc/ssl/certs/bigjj.site.crt',                   # 自定义证书
+                '/opt/mobile-proxy/cert.pem'                       # 本地证书
+            ]
+            key_paths = [
+                '/etc/letsencrypt/live/bigjj.site/privkey.pem',    # Let's Encrypt
+                '/etc/ssl/private/bigjj.site.key',                 # 自定义私钥
+                '/opt/mobile-proxy/key.pem'                        # 本地私钥
+            ]
+            
+            cert_file = None
+            key_file = None
+            
+            for cert_path in cert_paths:
+                if os.path.exists(cert_path):
+                    cert_file = cert_path
+                    break
+                    
+            for key_path in key_paths:
+                if os.path.exists(key_path):
+                    key_file = key_path
+                    break
+            
+            if cert_file and key_file:
+                import ssl
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain(cert_file, key_file)
+                server.socket = context.wrap_socket(server.socket, server_side=True)
+                print(f"🔒 HTTPS API服务器启动在端口 {port} (SSL: {cert_file})")
+            else:
+                print(f"⚠️ SSL证书未找到，使用HTTP模式在端口 {port}")
+        else:
+            print(f"🔗 HTTP API服务器启动在端口 {port}")
+            
         server.serve_forever()
     except Exception as e:
         print(f"❌ API服务器启动失败: {e}")
+        import traceback
+        traceback.print_exc()
 
-def start_websocket_server(port=8765):
+def start_websocket_server(port=8765, use_ssl=True):
     """启动WebSocket服务器"""
     try:
         print(f"📱 WebSocket服务器启动在端口 {port}")
@@ -387,7 +427,43 @@ def start_websocket_server(port=8765):
         asyncio.set_event_loop(loop)
         
         async def run_server():
-            server = await websockets.serve(websocket_handler, "0.0.0.0", port)
+            ssl_context = None
+            
+            if use_ssl:
+                # 查找SSL证书文件
+                cert_paths = [
+                    '/etc/letsencrypt/live/bigjj.site/fullchain.pem',
+                    '/etc/ssl/certs/bigjj.site.crt',
+                    '/opt/mobile-proxy/cert.pem'
+                ]
+                key_paths = [
+                    '/etc/letsencrypt/live/bigjj.site/privkey.pem',
+                    '/etc/ssl/private/bigjj.site.key',
+                    '/opt/mobile-proxy/key.pem'
+                ]
+                
+                cert_file = None
+                key_file = None
+                
+                for cert_path in cert_paths:
+                    if os.path.exists(cert_path):
+                        cert_file = cert_path
+                        break
+                        
+                for key_path in key_paths:
+                    if os.path.exists(key_path):
+                        key_file = key_path
+                        break
+                
+                if cert_file and key_file:
+                    import ssl
+                    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    ssl_context.load_cert_chain(cert_file, key_file)
+                    print(f"🔒 WSS WebSocket服务器 (SSL: {cert_file})")
+                else:
+                    print(f"⚠️ SSL证书未找到，使用WS模式")
+            
+            server = await websockets.serve(websocket_handler, "0.0.0.0", port, ssl=ssl_context)
             print(f"✅ WebSocket服务器成功绑定到 0.0.0.0:{port}")
             await server.wait_closed()
         
