@@ -308,8 +308,8 @@ class APIHandler(BaseHTTPRequestHandler):
                     <h2>配置信息</h2>
                     <ul>
                         <li>代理地址: bigjj.site:8888</li>
-                        <li>WebSocket: wss://bigjj.site:8765</li>
-                        <li>API接口: https://bigjj.site:5010</li>
+                        <li>WebSocket: ws://bigjj.site:8765</li>
+                        <li>API接口: http://bigjj.site:5010</li>
                         <li>Web管理: http://bigjj.site:8010</li>
                     </ul>
                     
@@ -369,7 +369,7 @@ async def websocket_handler(websocket, path):
         proxy_addon.remove_websocket_client(websocket)
         print(f"📱 WebSocket断开: {client_info}")
 
-def start_api_server(port=5010, use_ssl=True):
+def start_api_server(port=5010, use_ssl=False):
     """启动HTTP API服务器"""
     try:
         server = HTTPServer(('0.0.0.0', port), APIHandler)
@@ -417,7 +417,7 @@ def start_api_server(port=5010, use_ssl=True):
         import traceback
         traceback.print_exc()
 
-def start_websocket_server(port=8765, use_ssl=True):
+def start_websocket_server(port=8765, use_ssl=False):
     """启动WebSocket服务器"""
     try:
         print(f"📱 WebSocket服务器启动在端口 {port}")
@@ -489,9 +489,9 @@ def main():
     
     print("🌍 域名: bigjj.site")
     print("📡 代理服务器: bigjj.site:8888")
-    print("📱 WebSocket: wss://bigjj.site:8765")
-    print("🔗 API接口: https://bigjj.site:5010")
-    print("🌐 状态页面: https://bigjj.site:5010")
+    print("📱 WebSocket: ws://bigjj.site:8765")
+    print("🔗 API接口: http://bigjj.site:5010")
+    print("🌐 状态页面: http://bigjj.site:5010")
     print("=" * 60)
     print("✅ 所有服务启动完成！")
     print("📱 请在Android应用中选择'远程代理'模式并配置WiFi代理。")

@@ -36,8 +36,8 @@ class RemoteProxyManager(private val context: Context) {
         private const val API_PORT = 5010
     }
     
-    private val websocketUrl = "wss://$SERVER_HOST:$WEBSOCKET_PORT"
-    private val apiUrl = "https://$SERVER_HOST:$API_PORT/api"
+    private val websocketUrl = "ws://$SERVER_HOST:$WEBSOCKET_PORT"
+    private val apiUrl = "http://$SERVER_HOST:$API_PORT/api"
     
     private var webSocket: WebSocket? = null
     private var isConnected = false
@@ -120,7 +120,7 @@ class RemoteProxyManager(private val context: Context) {
             您可以在应用中实时查看抓包数据！
             
             💡 提示：如需HTTPS明文解密，请访问：
-            https://$SERVER_HOST:5010/cert.pem
+            http://$SERVER_HOST:5010/cert.pem
             下载并安装证书。
         """.trimIndent()
         
