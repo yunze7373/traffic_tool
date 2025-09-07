@@ -367,7 +367,8 @@ def main():
             "--set", "confdir=~/.mitmproxy",
             "--set", "block_global=false",  # 允许全球连接
             "--set", "allow_hosts=.*",      # 允许所有主机
-            "--mode", "regular@8888"        # 明确指定代理模式
+            "--mode", "regular@8888",       # 明确指定代理模式
+            "--set", "ssl_insecure=true"    # 忽略SSL证书错误
         ])
     except KeyboardInterrupt:
         print("\n🛑 服务器正在关闭...")
