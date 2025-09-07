@@ -364,8 +364,8 @@ def main():
         mitmdump([
             "-s", __file__, 
             "--listen-port", "8888",
-            "--web-host", "0.0.0.0",
-            "--web-port", "8010",
+            "--set", "web_host=0.0.0.0",
+            "--set", "web_port=8010",
             "--set", "confdir=~/.mitmproxy"
         ])
     except KeyboardInterrupt:
