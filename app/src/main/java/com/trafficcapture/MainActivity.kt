@@ -23,7 +23,7 @@ import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityR                .setNeutralButton("复制端口") { _, _ ->
                     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    val clip = android.content.ClipData.newPlainText("端口", "8080")
+                    val clip = android.content.ClipData.newPlainText("端口", "8888")
                     clipboard.setPrimaryClip(clip)
                     Toast.makeText(this, "端口号已复制", Toast.LENGTH_SHORT).show()
                 }ontracts
@@ -658,7 +658,7 @@ class MainActivity : AppCompatActivity() {
                 
                 代理配置信息：
                 主机名: $ip
-                端口: 8080
+                端口: 8888
                 
                 配置步骤：
                 1. 设置 → WiFi → 长按当前WiFi
@@ -666,7 +666,7 @@ class MainActivity : AppCompatActivity() {
                 3. 展开"高级选项"
                 4. 代理设置选择"手动"
                 5. 主机名输入: $ip
-                6. 端口输入: 8080
+                6. 端口输入: 8888
                 7. 保存设置
                 
                 然后即可开始抓包分析网络流量！
@@ -704,7 +704,7 @@ class MainActivity : AppCompatActivity() {
                 3. 展开"高级选项"
                 4. 代理设置选择"手动"
                 5. 主机名: bigjj.site
-                6. 端口: 8080
+                6. 端口: 8888
                 7. 保存设置
                 
                 💡 提示：配置完成后可实时查看所有流量！

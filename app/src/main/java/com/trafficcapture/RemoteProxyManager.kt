@@ -32,7 +32,7 @@ class RemoteProxyManager(private val context: Context) {
     companion object {
         private const val TAG = "RemoteProxyManager"
         private const val SERVER_HOST = "bigjj.site"  // 您的服务器域名
-        private const val PROXY_PORT = 8080  // 使用 mitmweb 服务端口
+        private const val PROXY_PORT = 8888  // 统一使用8888代理端口
         private const val WEBSOCKET_PORT = 8765
         private const val API_PORT = 5010
     }
