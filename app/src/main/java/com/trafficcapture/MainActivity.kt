@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSimpleVpn: Button
     private lateinit var btnHttpProxy: Button
     private lateinit var btnRemoteProxy: Button
+    private lateinit var btnWireGuardVpn: Button  // 新增WireGuard VPN按钮
 
     private lateinit var listAdapter: PacketAdapter
     private lateinit var mitmListView: ListView
@@ -69,12 +70,14 @@ class MainActivity : AppCompatActivity() {
         FULL,
         SIMPLE,
         HTTP_PROXY,
-        REMOTE_PROXY
+        REMOTE_PROXY,
+        WIREGUARD_VPN  // 新增WireGuard VPN模式
     }
     
     private var isCapturing = false
     private var httpsDecryptor: HttpsDecryptor? = null
     private var remoteProxyManager: RemoteProxyManager? = null
+    private var wireGuardConfigManager: WireGuardConfigManager? = null  // WireGuard配置管理器
 
     companion object {
         private const val TAG = "MainActivity"
